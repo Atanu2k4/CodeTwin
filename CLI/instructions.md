@@ -1,1 +1,0 @@
-Only push the CLI code to the repository, not the node_modules folder. You can add node_modules to your .gitignore file to ensure it is not included in your commits. This will help keep your repository clean and reduce its size.

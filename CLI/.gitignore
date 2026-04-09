@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+*.log
+
+# Bun / TS output
+bun.lockb
+dist/
+
+# CodeTwin runtime state
+.CodeTwin/*.db
+.CodeTwin/*.pid
+.CodeTwin/*.port
+.CodeTwin/config.json
+opencode/

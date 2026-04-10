@@ -1,6 +1,6 @@
 'use client'
 
-import { motion, useScroll, useVelocity, useSpring, useTransform } from 'framer-motion'
+import { motion, useInView, useScroll, useVelocity, useSpring, useTransform } from 'framer-motion'
 import Image from 'next/image'
 import { Download, Settings, Play, Check } from 'lucide-react'
 import InstallStrip from './InstallStrip'
@@ -40,11 +40,14 @@ interface GitHubContributor {
 }
 
 const easeOut = [0.16, 1, 0.3, 1] as const
+const CONTRIBUTORS_REFRESH_INTERVAL_MS = 60_000
 
 export default function GettingStartedSection() {
   const [contributors, setContributors] = useState<GitHubContributor[]>([])
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
 
   const sectionRef = useRef<HTMLElement>(null);
+  const isSectionInView = useInView(sectionRef, { margin: '-20% 0px -20% 0px' })
   
   const { scrollY } = useScroll();
   const { scrollYProgress } = useScroll({ target: sectionRef, offset: ["start end", "end start"] });
@@ -57,13 +60,47 @@ export default function GettingStartedSection() {
   const skewX = useTransform(skewVelocity, (v) => `${v}deg`);
 
   useEffect(() => {
-    fetch(`https://api.github.com/repos/Sahnik0/CodeTwin/contributors?per_page=5&t=${new Date().getTime()}`, { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setContributors(data)
-      })
-      .catch((err) => console.error('Failed to fetch contributors:', err))
-  }, [])
+    if (!isSectionInView) {
+      return
+    }
+
+    let isMounted = true
+
+    const fetchContributors = async () => {
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/Sahnik0/CodeTwin/contributors?per_page=5&t=${Date.now()}`,
+          { cache: 'no-store' }
+        )
+
+        if (!response.ok) {
+          return
+        }
+
+        const data = await response.json()
+
+        if (isMounted && Array.isArray(data)) {
+          setContributors(data)
+          setLastSyncedAt(Date.now())
+        }
+      } catch (err) {
+        console.error('Failed to fetch contributors:', err)
+      }
+    }
+
+    fetchContributors()
+    const intervalId = window.setInterval(fetchContributors, CONTRIBUTORS_REFRESH_INTERVAL_MS)
+
+    return () => {
+      isMounted = false
+      window.clearInterval(intervalId)
+    }
+  }, [isSectionInView])
+
+  const syncedLabel = lastSyncedAt
+    ? new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
+
   return (
     <section ref={sectionRef} className="relative py-28 px-6 border-t border-border-default overflow-hidden">
       {/* Massive Background Marquee */}
@@ -203,6 +240,9 @@ export default function GettingStartedSection() {
                   <div className="text-xs text-text-muted animate-pulse">Loading contributors...</div>
                 )}
               </div>
+              <p className="mt-3 text-[11px] text-text-muted/80 font-mono">
+                {syncedLabel ? `Live sync ${syncedLabel}` : 'Live sync in progress...'}
+              </p>
               <a
                 href="https://github.com/Sahnik0/CodeTwin/graphs/contributors"
                 target="_blank"

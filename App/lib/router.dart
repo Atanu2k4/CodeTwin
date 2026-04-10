@@ -45,8 +45,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       // Main app shell with bottom nav
-      StatefulShellRoute.indexedStack(
+      StatefulShellRoute(
         parentNavigatorKey: _rootNavigatorKey,
+        navigatorContainerBuilder: (context, navigationShell, children) {
+          return SwipeableShellContainer(
+            navigationShell: navigationShell,
+            children: children,
+          );
+        },
         builder: (context, state, shell) => ShellScreen(shell: shell),
         branches: [
           StatefulShellBranch(

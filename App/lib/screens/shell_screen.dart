@@ -1,10 +1,65 @@
-/// Root scaffold with BottomNavigationBar and DaemonStatusBar.
-
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/session_provider.dart';
 import '../widgets/daemon_status_bar.dart';
+
+class SwipeableShellContainer extends StatefulWidget {
+  final StatefulNavigationShell navigationShell;
+  final List<Widget> children;
+
+  const SwipeableShellContainer({
+    super.key,
+    required this.navigationShell,
+    required this.children,
+  });
+
+  @override
+  State<SwipeableShellContainer> createState() => _SwipeableShellContainerState();
+}
+
+class _SwipeableShellContainerState extends State<SwipeableShellContainer> {
+  late PageController _pageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(initialPage: widget.navigationShell.currentIndex);
+  }
+
+  @override
+  void didUpdateWidget(covariant SwipeableShellContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.navigationShell.currentIndex != _pageController.page?.round()) {
+      _pageController.animateToPage(
+        widget.navigationShell.currentIndex,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutQuart,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PageView(
+      controller: _pageController,
+      onPageChanged: (index) {
+        // Keeps router correctly synced with the physical swipe movement
+        widget.navigationShell.goBranch(
+          index,
+          initialLocation: index == widget.navigationShell.currentIndex,
+        );
+      },
+      children: widget.children,
+    );
+  }
+}
 
 class ShellScreen extends ConsumerWidget {
   final StatefulNavigationShell shell;
@@ -13,9 +68,11 @@ class ShellScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final session = ref.watch(sessionProvider).valueOrNull ?? SessionState.empty;
-    final pendingCount =
-        session.preflightQueue.length + session.decisionQueue.length;
+    final sessionAsync = ref.watch(sessionProvider);
+    final session = sessionAsync.valueOrNull;
+    final int badgeCount = session == null
+        ? 0
+        : session.preflightQueue.length + session.decisionQueue.length;
 
     return Scaffold(
       body: SafeArea(
@@ -32,34 +89,28 @@ class ShellScreen extends ConsumerWidget {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: shell.currentIndex,
-        onDestinationSelected: (index) => shell.goBranch(
-          index,
-          initialLocation: index == shell.currentIndex,
-        ),
+        onDestinationSelected: (index) {
+          shell.goBranch(
+            index,
+            initialLocation: index == shell.currentIndex,
+          );
+        },
         destinations: [
-          NavigationDestination(
-            icon: pendingCount > 0
-                ? Badge(
-                    label: Text('$pendingCount'),
-                    child: const Icon(Icons.dashboard_outlined),
-                  )
-                : const Icon(Icons.dashboard_outlined),
-            selectedIcon: pendingCount > 0
-                ? Badge(
-                    label: Text('$pendingCount'),
-                    child: const Icon(Icons.dashboard),
-                  )
-                : const Icon(Icons.dashboard),
+          const NavigationDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
             label: 'Dashboard',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.article_outlined),
-            selectedIcon: Icon(Icons.article),
+          NavigationDestination(
+            icon: Badge(
+              isLabelVisible: badgeCount > 0,
+              label: Text('$badgeCount'),
+              child: const Icon(Icons.list_alt),
+            ),
             label: 'Logs',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history),
+            icon: Icon(Icons.history),
             label: 'History',
           ),
           const NavigationDestination(

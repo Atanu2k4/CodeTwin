@@ -34,15 +34,15 @@ class LevelPicker extends StatelessWidget {
         children: [
           LayoutBuilder(
             builder: (context, constraints) {
-              // Ensure it doesn't overflow!
-              final maxAvailableWidth = constraints.maxWidth - 32; // 16 padding on each side
-              double calcWidth = maxAvailableWidth / totalLevels;
-              if (calcWidth > 56.0) calcWidth = 56.0; // limit max
+              // Ensure it doesn't overflow! Account for 1px borders (total 2px).
+              final maxAvailableWidth = constraints.maxWidth - 2.0; 
+              double calcWidth = (maxAvailableWidth / totalLevels).floorToDouble();
+              if (calcWidth > 56.0) calcWidth = 56.0; 
               final double tabWidth = calcWidth;
 
               return Container(
                 height: tabHeight,
-                width: tabWidth * totalLevels,
+                width: (tabWidth * totalLevels) + 2.0, // Account for exact 2px border!
                 decoration: BoxDecoration(
                   color: const Color(0xFF1C1C21),
                   borderRadius: BorderRadius.circular(22),

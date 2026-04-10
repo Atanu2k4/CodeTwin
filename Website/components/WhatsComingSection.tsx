@@ -1,6 +1,6 @@
 'use client'
 
-import { motion, useScroll, useVelocity, useSpring, useTransform } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Clock, Layers, Users, Cpu } from 'lucide-react'
 import SpotlightCard from './SpotlightCard'
 
@@ -40,15 +40,6 @@ const statusColors: Record<string, { bg: string; text: string; border: string }>
 const easeOut = [0.16, 1, 0.3, 1] as const
 
 export default function WhatsComingSection() {
-  const { scrollY } = useScroll();
-  const scrollVelocity = useVelocity(scrollY);
-  const smoothVelocity = useSpring(scrollVelocity, {
-    damping: 50,
-    stiffness: 400
-  });
-  const skewVelocity = useTransform(smoothVelocity, [-1000, 1000], [-2, 2]);
-  const skewY = useTransform(skewVelocity, (v) => `${v}deg`);
-
   return (
     <section className="py-28 px-6 bg-surface border-t border-border-default">
       <div className="max-w-6xl mx-auto">
@@ -71,7 +62,7 @@ export default function WhatsComingSection() {
           </p>
         </motion.div>
 
-        <motion.div style={{ skewY }} className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-stretch mt-14">
+        <motion.div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-stretch mt-14">
           {/* Left — feature cards */}
           <div className="flex flex-col gap-4">
             {upcomingFeatures.map((feature, i) => {

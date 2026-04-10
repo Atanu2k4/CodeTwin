@@ -1,6 +1,6 @@
 // @ts-ignore better-sqlite3 typings use `export =`; runtime uses ESM-compatible default import here.
 import Database from "better-sqlite3"
-import { and, desc, eq, like, or } from "drizzle-orm"
+import { and, desc, eq, inArray, like, or } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/better-sqlite3"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
@@ -16,6 +16,14 @@ import {
 } from "./schema"
 
 type TwinDb = ReturnType<typeof drizzle>
+type DecisionRow = typeof decisionsTable.$inferSelect
+type CausalEdgeRow = typeof causalEdgesTable.$inferSelect
+
+const DEFAULT_CAUSAL_DECISION_SCAN_LIMIT = 300
+const DEFAULT_CAUSAL_KEYWORD_MATCH_LIMIT = 150
+const DEFAULT_CAUSAL_EDGES_PER_DEPTH = 220
+const MAX_QUERY_TOKEN_COUNT = 6
+const ID_QUERY_CHUNK_SIZE = 150
 
 let sqlite: Database.Database | null = null
 let db: TwinDb | null = null
@@ -118,6 +126,14 @@ interface RankedCausalDecision {
   relation: CausalRelation
 }
 
+export interface TwinProjectSummary {
+  projectId: string
+  name: string
+  rootDir: string
+  stack: string[]
+  createdAt: string
+}
+
 const RANKING_STOPWORDS = new Set([
   "the",
   "and",
@@ -197,7 +213,7 @@ function computeDecisionSimilarity(decision: Decision, taskTokens: string[]): nu
   return matches / taskTokens.length
 }
 
-function buildAdjacency(edges: Array<typeof causalEdgesTable.$inferSelect>): {
+function buildAdjacency(edges: CausalEdgeRow[]): {
   incoming: Map<string, string[]>
   outgoing: Map<string, string[]>
 } {
@@ -273,6 +289,134 @@ function toOneLine(input: string, maxChars: number): string {
   const normalized = input.replace(/\s+/g, " ").trim()
   if (normalized.length <= maxChars) return normalized
   return `${normalized.slice(0, maxChars).trim()}...`
+}
+
+function mapProjectRow(row: typeof projectsTable.$inferSelect): TwinProjectSummary {
+  return {
+    projectId: row.projectId,
+    name: row.name,
+    rootDir: row.rootDir,
+    stack: parseStringArray(row.stackJson),
+    createdAt: row.createdAt,
+  }
+}
+
+function uniqueTokens(tokens: string[], maxCount: number): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const token of tokens) {
+    if (seen.has(token)) continue
+    seen.add(token)
+    result.push(token)
+    if (result.length >= maxCount) break
+  }
+
+  return result
+}
+
+function mergeDecisionRowsByRecency(rows: DecisionRow[], maxItems: number): DecisionRow[] {
+  const byId = new Map<string, DecisionRow>()
+  for (const row of rows) {
+    if (!byId.has(row.id)) {
+      byId.set(row.id, row)
+    }
+  }
+
+  return Array.from(byId.values())
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+    .slice(0, maxItems)
+}
+
+async function selectDecisionCandidates(
+  database: TwinDb,
+  projectId: string,
+  taskTokens: string[],
+  options?: {
+    maxCandidateDecisions?: number
+    maxKeywordMatches?: number
+  },
+): Promise<DecisionRow[]> {
+  const maxCandidateDecisions = options?.maxCandidateDecisions ?? DEFAULT_CAUSAL_DECISION_SCAN_LIMIT
+
+  const recentRows = database
+    .select()
+    .from(decisionsTable)
+    .where(eq(decisionsTable.projectId, projectId))
+    .orderBy(desc(decisionsTable.timestamp))
+    .limit(maxCandidateDecisions)
+    .all()
+
+  const keywords = uniqueTokens(taskTokens, MAX_QUERY_TOKEN_COUNT)
+  if (keywords.length === 0) {
+    return recentRows
+  }
+
+  const keywordPredicates = keywords.flatMap((token) => {
+    const queryLike = `%${token}%`
+    return [
+      like(decisionsTable.description, queryLike),
+      like(decisionsTable.choice, queryLike),
+      like(decisionsTable.reasoning, queryLike),
+    ]
+  })
+
+  if (keywordPredicates.length === 0) {
+    return recentRows
+  }
+
+  const keywordRows = database
+    .select()
+    .from(decisionsTable)
+    .where(and(eq(decisionsTable.projectId, projectId), or(...keywordPredicates)))
+    .orderBy(desc(decisionsTable.timestamp))
+    .limit(options?.maxKeywordMatches ?? DEFAULT_CAUSAL_KEYWORD_MATCH_LIMIT)
+    .all()
+
+  return mergeDecisionRowsByRecency([...keywordRows, ...recentRows], maxCandidateDecisions)
+}
+
+async function loadDecisionsByIds(database: TwinDb, projectId: string, ids: string[]): Promise<DecisionRow[]> {
+  const uniqueIds = Array.from(new Set(ids))
+  if (uniqueIds.length === 0) return []
+
+  const rows: DecisionRow[] = []
+  for (let index = 0; index < uniqueIds.length; index += ID_QUERY_CHUNK_SIZE) {
+    const chunk = uniqueIds.slice(index, index + ID_QUERY_CHUNK_SIZE)
+    const chunkRows = database
+      .select()
+      .from(decisionsTable)
+      .where(and(eq(decisionsTable.projectId, projectId), inArray(decisionsTable.id, chunk)))
+      .all()
+    rows.push(...chunkRows)
+  }
+
+  return rows
+}
+
+async function loadEdgesForFrontier(
+  database: TwinDb,
+  projectId: string,
+  frontier: string[],
+  maxEdgesPerDepth: number,
+): Promise<CausalEdgeRow[]> {
+  const uniqueFrontier = Array.from(new Set(frontier))
+  if (uniqueFrontier.length === 0) return []
+
+  return database
+    .select()
+    .from(causalEdgesTable)
+    .where(
+      and(
+        eq(causalEdgesTable.projectId, projectId),
+        or(
+          inArray(causalEdgesTable.fromDecisionId, uniqueFrontier),
+          inArray(causalEdgesTable.toDecisionId, uniqueFrontier),
+        ),
+      ),
+    )
+    .limit(maxEdgesPerDepth)
+    .all()
 }
 
 export const twin = {
@@ -478,17 +622,18 @@ export const twin = {
       maxDepth?: number
       maxNodes?: number
       maxEdges?: number
+      maxCandidateDecisions?: number
+      maxKeywordMatches?: number
+      maxEdgesPerDepth?: number
     },
   ): Promise<string> {
     const database = await getDb()
 
-    const decisionRows = database
-      .select()
-      .from(decisionsTable)
-      .where(eq(decisionsTable.projectId, projectId))
-      .orderBy(desc(decisionsTable.timestamp))
-      .limit(250)
-      .all()
+    const taskTokens = tokenizeForRanking(task)
+    const decisionRows = await selectDecisionCandidates(database, projectId, taskTokens, {
+      maxCandidateDecisions: options?.maxCandidateDecisions,
+      maxKeywordMatches: options?.maxKeywordMatches,
+    })
 
     if (decisionRows.length === 0) {
       return "Relevant causal graph nodes: None"
@@ -496,16 +641,6 @@ export const twin = {
 
     const decisions = decisionRows.map(mapDecisionRow)
     const decisionById = new Map(decisions.map((decision) => [decision.id, decision]))
-
-    const edgeRows = database
-      .select()
-      .from(causalEdgesTable)
-      .where(eq(causalEdgesTable.projectId, projectId))
-      .all()
-      .filter((edge) => decisionById.has(edge.fromDecisionId) && decisionById.has(edge.toDecisionId))
-
-    const { incoming, outgoing } = buildAdjacency(edgeRows)
-    const taskTokens = tokenizeForRanking(task)
     const similarityById = new Map<string, number>()
 
     for (const decision of decisions) {
@@ -524,6 +659,54 @@ export const twin = {
     const seeds = (seedCandidates.length > 0 ? seedCandidates : decisions.slice(0, 2)).slice(0, maxSeeds)
 
     const maxDepth = options?.maxDepth ?? 2
+    const maxEdgesPerDepth = options?.maxEdgesPerDepth ?? DEFAULT_CAUSAL_EDGES_PER_DEPTH
+    const edgeByKey = new Map<string, CausalEdgeRow>()
+    const visitedNodeIds = new Set(seeds.map((seed) => seed.id))
+    let frontier = seeds.map((seed) => seed.id)
+
+    for (let depth = 1; depth <= maxDepth; depth += 1) {
+      if (frontier.length === 0) break
+
+      const frontierSet = new Set(frontier)
+      const depthEdges = await loadEdgesForFrontier(database, projectId, frontier, maxEdgesPerDepth)
+      const nextFrontier = new Set<string>()
+
+      for (const edge of depthEdges) {
+        edgeByKey.set(`${edge.fromDecisionId}->${edge.toDecisionId}`, edge)
+
+        if (frontierSet.has(edge.fromDecisionId) && !visitedNodeIds.has(edge.toDecisionId)) {
+          visitedNodeIds.add(edge.toDecisionId)
+          nextFrontier.add(edge.toDecisionId)
+        }
+        if (frontierSet.has(edge.toDecisionId) && !visitedNodeIds.has(edge.fromDecisionId)) {
+          visitedNodeIds.add(edge.fromDecisionId)
+          nextFrontier.add(edge.fromDecisionId)
+        }
+      }
+
+      frontier = Array.from(nextFrontier)
+    }
+
+    for (const edge of edgeByKey.values()) {
+      visitedNodeIds.add(edge.fromDecisionId)
+      visitedNodeIds.add(edge.toDecisionId)
+    }
+
+    const missingIds = Array.from(visitedNodeIds).filter((id) => !decisionById.has(id))
+    if (missingIds.length > 0) {
+      const missingRows = await loadDecisionsByIds(database, projectId, missingIds)
+      for (const row of missingRows) {
+        const decision = mapDecisionRow(row)
+        decisionById.set(decision.id, decision)
+        similarityById.set(decision.id, computeDecisionSimilarity(decision, taskTokens))
+      }
+    }
+
+    const edgeRows = Array.from(edgeByKey.values()).filter(
+      (edge) => decisionById.has(edge.fromDecisionId) && decisionById.has(edge.toDecisionId),
+    )
+    const { incoming, outgoing } = buildAdjacency(edgeRows)
+
     const nodeMeta = new Map<string, { distance: number; relation: CausalRelation }>()
 
     for (const seed of seeds) {
@@ -564,8 +747,18 @@ export const twin = {
 
     const selectedIds = new Set(topNodes.map((item) => item.decision.id))
     const maxEdges = options?.maxEdges ?? 12
+    const nodeRank = new Map(topNodes.map((item, index) => [item.decision.id, index]))
     const selectedEdges = edgeRows
       .filter((edge) => selectedIds.has(edge.fromDecisionId) && selectedIds.has(edge.toDecisionId))
+      .sort((left, right) => {
+        const leftScore =
+          (nodeRank.get(left.fromDecisionId) ?? Number.MAX_SAFE_INTEGER) +
+          (nodeRank.get(left.toDecisionId) ?? Number.MAX_SAFE_INTEGER)
+        const rightScore =
+          (nodeRank.get(right.fromDecisionId) ?? Number.MAX_SAFE_INTEGER) +
+          (nodeRank.get(right.toDecisionId) ?? Number.MAX_SAFE_INTEGER)
+        return leftScore - rightScore
+      })
       .slice(0, maxEdges)
 
     const lines: string[] = []
@@ -576,7 +769,7 @@ export const twin = {
       const description = toOneLine(item.decision.description, 90)
       const reasoning = toOneLine(item.decision.reasoning, 120)
       lines.push(
-        `- [${id}] ${date} (${item.relation}, depth=${item.distance}, score=${item.similarity.toFixed(2)}): ${item.decision.choice} -> ${description} | why: ${reasoning}`,
+        `- [${id}] ${date} (${item.relation}, depth=${item.distance}, sim=${item.similarity.toFixed(2)}, rank=${item.score.toFixed(2)}): ${item.decision.choice} -> ${description} | why: ${reasoning}`,
       )
     }
 
@@ -630,6 +823,17 @@ export const twin = {
         },
       })
       .run()
+  },
+
+  async listProjects(): Promise<TwinProjectSummary[]> {
+    const database = await getDb()
+    return database.select().from(projectsTable).orderBy(desc(projectsTable.createdAt)).all().map(mapProjectRow)
+  },
+
+  async getProject(projectId: string): Promise<TwinProjectSummary | undefined> {
+    const database = await getDb()
+    const row = database.select().from(projectsTable).where(eq(projectsTable.projectId, projectId)).get()
+    return row ? mapProjectRow(row) : undefined
   },
 
   async searchDecisions(projectId: string, query: string): Promise<Decision[]> {

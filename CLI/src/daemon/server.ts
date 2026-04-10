@@ -11,6 +11,7 @@ import {
   saveConfig,
 } from "../config"
 import { ProjectConfigSchema } from "../config/schema"
+import type { ProjectConfig } from "../shared/types"
 import { runAgentLoop } from "./agent-loop"
 import { PreflightManager, type PreflightDecision, decisionToApproval } from "./preflight"
 import type {
@@ -39,13 +40,37 @@ import {
   TASK_MAX_RUNTIME_MS,
 } from "../shared/constants"
 import { twin } from "../twin"
+import {
+  findLatestSessionRecord,
+  getSessionRecord,
+  listSessionRecords,
+  removeSessionRecord,
+  touchSessionRecord,
+  upsertSessionRecord,
+  type SessionRecord,
+} from "../session/store"
 
 const SessionNewSchema = z
   .object({
     projectId: z.string().optional(),
     dependenceLevel: DependenceLevelSchema.optional(),
+    sessionId: z.string().optional(),
+    continueLast: z.boolean().optional(),
+    fork: z.boolean().optional(),
+    title: z.string().min(1).optional(),
   })
   .optional()
+
+const ProjectCreateSchema = z.object({
+  name: z.string().min(1),
+  rootDir: z.string().optional(),
+  stack: z.array(z.string()).optional(),
+  select: z.boolean().optional(),
+})
+
+const ProjectSelectSchema = z.object({
+  projectId: z.string().min(1),
+})
 
 const ConstraintCreateSchema = z.object({
   description: z.string().min(1),
@@ -74,6 +99,7 @@ const ConfigUpdateSchema = z.object({
   apiKey: z.string().optional(),
   baseUrl: z.string().url().optional(),
   stack: z.array(z.string()).optional(),
+  activeSessionId: z.string().optional(),
   connectors: z.array(ProjectConfigSchema.shape.connectors.element).optional(),
   name: z.string().optional(),
   rootDir: z.string().optional(),
@@ -177,6 +203,118 @@ function maskConfigSecrets(config: unknown): unknown {
     return result
   }
   return config
+}
+
+async function loadConfigSafe(): Promise<ProjectConfig | undefined> {
+  try {
+    return await loadConfig()
+  } catch {
+    return undefined
+  }
+}
+
+async function saveConfigSafe(config: ProjectConfig): Promise<void> {
+  try {
+    await saveConfig(config)
+  } catch {
+    // Best-effort persistence only.
+  }
+}
+
+async function rememberActiveSession(sessionId: string): Promise<void> {
+  const config = await loadConfigSafe()
+  if (!config) return
+  if (config.activeSessionId === sessionId) return
+
+  await saveConfigSafe({
+    ...config,
+    activeSessionId: sessionId,
+  })
+}
+
+async function clearActiveSessionIfMatches(sessionId: string): Promise<void> {
+  const config = await loadConfigSafe()
+  if (!config) return
+  if (config.activeSessionId !== sessionId) return
+
+  const { activeSessionId: _, ...rest } = config
+  await saveConfigSafe(rest)
+}
+
+function normalizeSessionTitle(title: string): string {
+  const collapsed = title.replace(/\s+/g, " ").trim()
+  if (collapsed.length <= 80) return collapsed
+  return `${collapsed.slice(0, 80).trim()}...`
+}
+
+function defaultSessionTitle(projectId: string): string {
+  return `Session ${projectId.slice(0, 8)} ${nowIso()}`
+}
+
+function ensureRuntimeForRecord(record: SessionRecord): SessionRuntime {
+  const existing = sessions.get(record.id)
+  if (existing) {
+    if (existing.projectId !== record.projectId || existing.createdAt !== record.createdAt) {
+      const updated: SessionRuntime = {
+        ...existing,
+        projectId: record.projectId,
+        createdAt: record.createdAt,
+      }
+      sessions.set(updated.id, updated)
+      return updated
+    }
+    return existing
+  }
+
+  const created: SessionRuntime = {
+    id: record.id,
+    projectId: record.projectId,
+    status: "idle",
+    dependenceLevel: record.dependenceLevel,
+    remoteConnected: false,
+    createdAt: record.createdAt,
+  }
+  sessions.set(created.id, created)
+  return created
+}
+
+function withSessionPreview(record: SessionRecord, runtime?: SessionRuntime): {
+  id: string
+  projectId: string
+  title: string
+  parentId?: string
+  dependenceLevel: DependenceLevel
+  status: SessionStatusPayload["status"]
+  currentTask?: string
+  remoteConnected: boolean
+  createdAt: string
+  updatedAt: string
+  archivedAt?: string
+  runtimeActive: boolean
+} {
+  return {
+    id: record.id,
+    projectId: record.projectId,
+    title: record.title,
+    parentId: record.parentId,
+    dependenceLevel: runtime?.dependenceLevel ?? record.dependenceLevel,
+    status: runtime?.status ?? "idle",
+    currentTask: runtime?.currentTask,
+    remoteConnected: runtime?.remoteConnected ?? false,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    archivedAt: record.archivedAt,
+    runtimeActive: Boolean(runtime),
+  }
+}
+
+async function resolveSessionRuntime(sessionId: string): Promise<SessionRuntime | undefined> {
+  const existing = sessions.get(sessionId)
+  if (existing) return existing
+
+  const stored = await getSessionRecord(sessionId)
+  if (!stored) return undefined
+  return ensureRuntimeForRecord(stored)
 }
 
 function createMessage(input: {
@@ -425,6 +563,13 @@ async function startTask(input: {
     currentTask: input.task,
     dependenceLevel: input.dependenceLevel ?? input.session.dependenceLevel,
   })
+
+  const title = normalizeSessionTitle(input.task)
+  await touchSessionRecord(session.id, {
+    updatedAt: nowIso(),
+    title,
+    dependenceLevel: session.dependenceLevel,
+  })
   await broadcastStatus(session)
 
   const controller = new AbortController()
@@ -532,6 +677,11 @@ async function startTask(input: {
       clearActiveTask(session.id)
       if (!sessions.has(session.id)) return
 
+      void touchSessionRecord(session.id, {
+        updatedAt: nowIso(),
+        dependenceLevel: session.dependenceLevel,
+      })
+
       const updated = updateSessionStatus(session, {
         status: "idle",
         currentTask: undefined,
@@ -552,6 +702,11 @@ async function startTask(input: {
       clearActiveTask(session.id)
 
       if (!sessions.has(session.id)) return
+
+      void touchSessionRecord(session.id, {
+        updatedAt: nowIso(),
+        dependenceLevel: session.dependenceLevel,
+      })
 
       const cancelMessage =
         abortReason instanceof Error
@@ -688,9 +843,14 @@ function cleanupSessionState(sessionId: string): void {
   }
 }
 
-function ensureSessionForRemoteMessage(message: AgentMessage): SessionRuntime {
+async function ensureSessionForRemoteMessage(message: AgentMessage): Promise<SessionRuntime> {
   const existing = sessions.get(message.sessionId)
   if (existing) return existing
+
+  const stored = await getSessionRecord(message.sessionId)
+  if (stored) {
+    return ensureRuntimeForRecord(stored)
+  }
 
   const created: SessionRuntime = {
     id: message.sessionId || randomUUID(),
@@ -701,6 +861,18 @@ function ensureSessionForRemoteMessage(message: AgentMessage): SessionRuntime {
     createdAt: nowIso(),
   }
   sessions.set(created.id, created)
+
+  await upsertSessionRecord({
+    id: created.id,
+    projectId: created.projectId,
+    directory: process.cwd(),
+    title: defaultSessionTitle(created.projectId),
+    dependenceLevel: created.dependenceLevel,
+    createdAt: created.createdAt,
+    updatedAt: created.createdAt,
+  })
+  await rememberActiveSession(created.id)
+
   return created
 }
 
@@ -718,7 +890,7 @@ export async function handleBridgeMessage(message: AgentMessage): Promise<AgentM
     const parsed = parseBody(message.payload, TaskSubmitSchema)
     if (!parsed.ok) return null
 
-    const session = ensureSessionForRemoteMessage(message)
+    const session = await ensureSessionForRemoteMessage(message)
     if (session.status === "running" || session.status === "awaiting_approval") {
       void emitAgentLog({
         sessionId: session.id,
@@ -738,7 +910,7 @@ export async function handleBridgeMessage(message: AgentMessage): Promise<AgentM
   }
 
   if (message.type === "TASK_CANCEL") {
-    const session = sessions.get(message.sessionId)
+    const session = await resolveSessionRuntime(message.sessionId)
     if (!session) return null
 
     const reason = "Task cancelled by remote client"
@@ -776,11 +948,15 @@ export async function handleBridgeMessage(message: AgentMessage): Promise<AgentM
   if (message.type === "LEVEL_CHANGE") {
     const parsed = parseBody(message.payload, LevelChangeSchema)
     if (!parsed.ok) return null
-    const session = sessions.get(message.sessionId)
+    const session = await resolveSessionRuntime(message.sessionId)
     if (!session) return null
 
     const updated = updateSessionStatus(session, {
       dependenceLevel: parsed.data.newLevel,
+    })
+    void touchSessionRecord(updated.id, {
+      dependenceLevel: parsed.data.newLevel,
+      updatedAt: nowIso(),
     })
 
     const payload: LevelChangePayload = {
@@ -815,38 +991,91 @@ export function createDaemonServer(): Hono {
     const parsed = parseBody(body, SessionNewSchema)
     if (!parsed.ok) return c.json(parsed.error, 400)
 
-    let projectId = parsed.data?.projectId
-    let dependenceLevel = parsed.data?.dependenceLevel ?? 3
+    const config = await loadConfigSafe()
+    let projectId = parsed.data?.projectId ?? config?.projectId ?? "default-project"
+    const dependenceLevel = parsed.data?.dependenceLevel ?? config?.dependenceLevel ?? 3
+    const sessionIdHint = parsed.data?.sessionId ?? config?.activeSessionId
+    const continueLast = parsed.data?.continueLast ?? true
+    const fork = parsed.data?.fork ?? false
+    const directory = config?.rootDir ?? process.cwd()
 
-    if (!projectId) {
-      try {
-        const config = await loadConfig()
-        projectId = config.projectId
-        dependenceLevel = config.dependenceLevel
-      } catch {
-        projectId = "default-project"
+    let baseRecord: SessionRecord | undefined
+    if (sessionIdHint) {
+      baseRecord = await getSessionRecord(sessionIdHint)
+      if (!baseRecord && parsed.data?.sessionId) {
+        return c.json({ error: `Session not found: ${parsed.data.sessionId}` }, 404)
       }
     }
 
+    if (!baseRecord && continueLast) {
+      baseRecord = await findLatestSessionRecord({
+        projectId,
+        directory,
+      })
+    }
+
+    if (baseRecord && !fork) {
+      projectId = baseRecord.projectId
+      const runtime = ensureRuntimeForRecord(baseRecord)
+
+      await touchSessionRecord(runtime.id, {
+        dependenceLevel: runtime.dependenceLevel,
+        updatedAt: nowIso(),
+      })
+      await rememberActiveSession(runtime.id)
+
+      return c.json({
+        sessionId: runtime.id,
+        projectId: runtime.projectId,
+        dependenceLevel: runtime.dependenceLevel,
+        resumed: true,
+        parentSessionId: baseRecord.parentId ?? null,
+        title: baseRecord.title,
+      })
+    }
+
+    const createdAt = nowIso()
+    const sessionId = randomUUID()
+    const parentId = fork ? baseRecord?.id : undefined
+    const title = normalizeSessionTitle(
+      parsed.data?.title ??
+        (fork && baseRecord ? `Fork of ${baseRecord.title}` : defaultSessionTitle(projectId)),
+    )
+
     const session: SessionRuntime = {
-      id: randomUUID(),
+      id: sessionId,
       projectId,
       status: "idle",
       dependenceLevel,
       remoteConnected: false,
-      createdAt: nowIso(),
+      createdAt,
     }
     sessions.set(session.id, session)
+
+    await upsertSessionRecord({
+      id: session.id,
+      projectId,
+      directory,
+      title,
+      parentId,
+      dependenceLevel,
+      createdAt,
+      updatedAt: createdAt,
+    })
+    await rememberActiveSession(session.id)
 
     return c.json({
       sessionId: session.id,
       projectId: session.projectId,
       dependenceLevel: session.dependenceLevel,
+      resumed: false,
+      parentSessionId: parentId ?? null,
+      title,
     })
   })
 
   app.post("/session/:id/task", async (c) => {
-    const session = sessions.get(c.req.param("id"))
+    const session = await resolveSessionRuntime(c.req.param("id"))
     if (!session) return c.json({ error: "Session not found" }, 404)
     if (session.status === "running" || session.status === "awaiting_approval" || activeTasks.has(session.id)) {
       return c.json({ error: "Session already has a running task" }, 409)
@@ -862,6 +1091,8 @@ export function createDaemonServer(): Hono {
     const parsed = parseBody(body, TaskSubmitSchema)
     if (!parsed.ok) return c.json(parsed.error, 400)
 
+    await rememberActiveSession(session.id)
+
     await startTask({
       session,
       task: parsed.data.task,
@@ -876,7 +1107,7 @@ export function createDaemonServer(): Hono {
   })
 
   app.post("/session/:id/cancel", async (c) => {
-    const session = sessions.get(c.req.param("id"))
+    const session = await resolveSessionRuntime(c.req.param("id"))
     if (!session) return c.json({ error: "Session not found" }, 404)
 
     if (!activeTasks.has(session.id) && session.status !== "running" && session.status !== "awaiting_approval") {
@@ -897,6 +1128,10 @@ export function createDaemonServer(): Hono {
     const updated = updateSessionStatus(session, {
       status: "paused",
       currentTask: undefined,
+    })
+    await touchSessionRecord(updated.id, {
+      updatedAt: nowIso(),
+      dependenceLevel: updated.dependenceLevel,
     })
 
     await emitAgentLog({
@@ -976,7 +1211,7 @@ export function createDaemonServer(): Hono {
   })
 
   app.get("/session/:id/status", async (c) => {
-    const session = sessions.get(c.req.param("id"))
+    const session = await resolveSessionRuntime(c.req.param("id"))
     if (!session) return c.json({ error: "Session not found" }, 404)
 
     const payload = buildSessionStatusPayload(session)
@@ -987,18 +1222,136 @@ export function createDaemonServer(): Hono {
   app.delete("/session/:id", async (c) => {
     const sessionId = c.req.param("id")
     const session = sessions.get(sessionId)
-    if (!session) return c.json({ error: "Session not found" }, 404)
+    const stored = await getSessionRecord(sessionId)
+    if (!session && !stored) return c.json({ error: "Session not found" }, 404)
 
     cancelSessionTask(sessionId, "Task cancelled because session was deleted")
 
     sessions.delete(sessionId)
     sessionSubscribers.delete(sessionId)
     cleanupSessionState(sessionId)
+    await removeSessionRecord(sessionId)
+    await clearActiveSessionIfMatches(sessionId)
     return c.json({ deleted: true, sessionId })
   })
 
   app.get("/sessions", async (c) => {
-    return c.json({ sessions: listSessions() })
+    const projectId = c.req.query("projectId")
+    const directory = c.req.query("directory")
+    const limitRaw = c.req.query("limit")
+    const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined
+
+    const records = await listSessionRecords({
+      projectId: projectId && projectId.length > 0 ? projectId : undefined,
+      directory: directory && directory.length > 0 ? directory : undefined,
+      limit: Number.isFinite(limit) ? limit : undefined,
+      includeArchived: false,
+    })
+
+    return c.json({
+      sessions: records.map((record) => withSessionPreview(record, sessions.get(record.id))),
+    })
+  })
+
+  app.get("/projects", async (c) => {
+    const projects = await twin.listProjects()
+    return c.json({ projects })
+  })
+
+  app.post("/projects/create", async (c) => {
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400)
+    }
+
+    const parsed = parseBody(body, ProjectCreateSchema)
+    if (!parsed.ok) return c.json(parsed.error, 400)
+
+    const currentConfig = await loadConfigSafe()
+    const projectId = randomUUID()
+    const rootDir = parsed.data.rootDir?.trim() || currentConfig?.rootDir || process.cwd()
+    const stack =
+      parsed.data.stack && parsed.data.stack.length > 0 ? parsed.data.stack : currentConfig?.stack ?? []
+
+    await twin.upsertProject({
+      projectId,
+      name: parsed.data.name,
+      rootDir,
+      stack,
+      createdAt: nowIso(),
+    })
+
+    let selected = false
+    if (parsed.data.select && currentConfig) {
+      await saveConfigSafe({
+        ...currentConfig,
+        projectId,
+        name: parsed.data.name,
+        rootDir,
+        stack,
+        activeSessionId: undefined,
+      })
+      daemonDeviceId = makeDeviceId(projectId)
+      selected = true
+    }
+
+    return c.json({
+      created: true,
+      selected,
+      project: {
+        projectId,
+        name: parsed.data.name,
+        rootDir,
+        stack,
+      },
+    })
+  })
+
+  app.post("/projects/select", async (c) => {
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400)
+    }
+
+    const parsed = parseBody(body, ProjectSelectSchema)
+    if (!parsed.ok) return c.json(parsed.error, 400)
+
+    const project = await twin.getProject(parsed.data.projectId)
+    if (!project) {
+      return c.json({ error: `Project not found: ${parsed.data.projectId}` }, 404)
+    }
+
+    const config = await loadConfigSafe()
+    if (!config) {
+      return c.json({ error: "Config not initialized. Run `CodeTwin config init` first." }, 404)
+    }
+
+    await saveConfigSafe({
+      ...config,
+      projectId: project.projectId,
+      name: project.name,
+      rootDir: project.rootDir,
+      stack: project.stack,
+      activeSessionId: undefined,
+    })
+    daemonDeviceId = makeDeviceId(project.projectId)
+
+    return c.json({
+      selected: true,
+      project,
+      config: maskConfigSecrets({
+        ...config,
+        projectId: project.projectId,
+        name: project.name,
+        rootDir: project.rootDir,
+        stack: project.stack,
+        activeSessionId: undefined,
+      }),
+    })
   })
 
   app.get("/twin/:projectId", async (c) => {
@@ -1084,6 +1437,7 @@ export function createDaemonServer(): Hono {
       if (!validated.ok) return c.json(validated.error, 400)
 
       await saveConfig(validated.data)
+      daemonDeviceId = makeDeviceId(validated.data.projectId)
       return c.json(maskConfigSecrets(validated.data))
     } catch (error) {
       if (error instanceof ConfigNotFoundError) {
@@ -1190,7 +1544,7 @@ export function createDaemonServer(): Hono {
   })
 
   app.post("/session/:id/level", async (c) => {
-    const session = sessions.get(c.req.param("id"))
+    const session = await resolveSessionRuntime(c.req.param("id"))
     if (!session) return c.json({ error: "Session not found" }, 404)
 
     let body: unknown
@@ -1205,6 +1559,10 @@ export function createDaemonServer(): Hono {
 
     const updated = updateSessionStatus(session, {
       dependenceLevel: parsed.data.newLevel,
+    })
+    await touchSessionRecord(updated.id, {
+      dependenceLevel: parsed.data.newLevel,
+      updatedAt: nowIso(),
     })
 
     const payload: LevelChangePayload = {

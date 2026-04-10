@@ -176,6 +176,7 @@ function buildSystemPrompt(input: {
     "Always show the pre-flight map before any write, delete, or shell action",
     "When multiple valid approaches exist, present them and ask",
     "When the user asks to create/build/fix code, execute concrete workspace actions with tools instead of stopping at a plan-only response",
+    "If the task implies implementation but no file path is provided, choose a sensible default output path and proceed",
     "Record every significant decision using record_decision tool",
     "If a proposed action violates a constraint, stop and report it immediately",
     "The user's machine is your working environment - never assume cloud infra",
@@ -188,19 +189,145 @@ function taskNeedsWorkspaceAction(task: string): boolean {
   const lower = task.toLowerCase().trim()
   if (lower.length === 0) return false
 
-  const actionVerb =
+  const implementationVerb =
     /\b(create|build|implement|fix|update|edit|write|add|setup|scaffold|generate|refactor|continue|make|develop|ship)\b/.test(
       lower,
     )
-  const artifactHint =
-    /\b(file|folder|project|component|ui|page|api|server|script|todo|to-do|website|web\s+app|index\.(ts|tsx|js|jsx|md))\b/.test(
+  const workspaceIntent =
+    /\b(file|folder|path|project|component|ui|page|api|server|script|website|web\s+app|code|typescript|javascript|react|next|node|repo|database|schema|test|index\.(ts|tsx|js|jsx|md))\b/.test(
       lower,
     )
-  const userIntentHint = /\b(i\s+want|please|can\s+you|kindly)\b/.test(lower)
+  const explicitPath = /([./]|\b)[a-z0-9._\/-]+\.(ts|tsx|js|jsx|json|md|css|html|py|go|rs|java)\b/.test(
+    lower,
+  )
+  const cliCommandIntent = /\b(npm|pnpm|yarn|bun|git|docker|kubectl|terraform)\b/.test(lower)
 
-  if (actionVerb) return true
-  if (artifactHint && userIntentHint) return true
+  if (explicitPath) return true
+  if (implementationVerb && (workspaceIntent || cliCommandIntent)) return true
   return false
+}
+
+function inferDefaultOutputTarget(task: string): string | null {
+  const lower = task.toLowerCase()
+
+  if (/\b(todo|to-do)\b/.test(lower) && /\b(react|next|tsx|web|ui|frontend)\b/.test(lower)) {
+    return "web-todo-list/pages/index.tsx"
+  }
+
+  if (/\b(todo|to-do)\b/.test(lower) && /\b(typescript|ts)\b/.test(lower)) {
+    return "todo.ts"
+  }
+
+  if (/\b(todo|to-do)\b/.test(lower)) {
+    return "TODO.md"
+  }
+
+  if (/\b(readme|documentation|docs)\b/.test(lower)) {
+    return "README.md"
+  }
+
+  return null
+}
+
+function normalizeWorkspaceFileCandidate(candidate: string): string | null {
+  const sanitized = candidate.trim().replace(/["'`),.;:]+$/g, "")
+  if (!sanitized) return null
+
+  const resolved = path.isAbsolute(sanitized) ? sanitized : path.resolve(process.cwd(), sanitized)
+  const relative = path.relative(process.cwd(), resolved)
+  if (!relative || relative.startsWith("..")) return null
+  if (!/\.[a-z0-9]+$/i.test(relative)) return null
+
+  return relative.split(path.sep).join("/")
+}
+
+function extractWorkspaceFilesFromText(text: string): string[] {
+  const matches = new Set<string>()
+  const patterns = [
+    /File\s+(?:created|updated|written|saved|edited|modified)\s+successfully:\s*([^\s]+)/gi,
+    /\b([A-Za-z0-9._\/-]+\.(?:html|css|js|jsx|ts|tsx|json|md|py|go|rs|java|sql|yaml|yml))\b/g,
+    /(\/[A-Za-z0-9._\/-]+\.[A-Za-z0-9]+)/g,
+  ]
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      const candidate = match[1]
+      if (!candidate) continue
+      const normalized = normalizeWorkspaceFileCandidate(candidate)
+      if (normalized) {
+        matches.add(normalized)
+      }
+    }
+  }
+
+  return Array.from(matches)
+}
+
+function extractRecentWorkspaceFilesFromHistory(messages: ModelMessage[], maxFiles = 8): string[] {
+  const seen = new Set<string>()
+  const results: string[] = []
+
+  const addFromText = (text: string) => {
+    for (const file of extractWorkspaceFilesFromText(text)) {
+      if (seen.has(file)) continue
+      seen.add(file)
+      results.push(file)
+      if (results.length >= maxFiles) return
+    }
+  }
+
+  for (let index = messages.length - 1; index >= 0 && results.length < maxFiles; index -= 1) {
+    const content = messages[index]?.content
+
+    if (typeof content === "string") {
+      addFromText(content)
+      continue
+    }
+
+    if (!Array.isArray(content)) continue
+
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue
+
+      const text = (part as { text?: unknown }).text
+      if (typeof text === "string") {
+        addFromText(text)
+      }
+
+      const output = (part as { output?: unknown }).output
+      if (typeof output === "string") {
+        addFromText(output)
+      } else if (output && typeof output === "object") {
+        const nested = (output as { value?: { output?: unknown } }).value?.output
+        if (typeof nested === "string") {
+          addFromText(nested)
+        }
+      }
+
+      if (results.length >= maxFiles) break
+    }
+  }
+
+  return results
+}
+
+function buildRecentFilesDirective(task: string, recentFiles: string[]): string | null {
+  if (recentFiles.length === 0) return null
+
+  const lower = task.toLowerCase()
+  const followUpIntent = /\b(improve|enhance|interactive|refine|polish|continue|iterate|update|make\s+it|ui|ux|style)\b/.test(
+    lower,
+  )
+
+  if (!followUpIntent) return null
+
+  const topFiles = recentFiles.slice(0, 6)
+  return [
+    "SESSION CONTEXT HINT:",
+    `Recent files changed in this same session: ${topFiles.join(", ")}.`,
+    "For follow-up implementation requests, prioritize reading/updating these files before choosing unrelated targets.",
+  ].join(" ")
 }
 
 function countToolCallsInSteps(steps: unknown[]): number {
@@ -400,6 +527,7 @@ export async function runAgentLoop(input: {
   let filesChanged: string[] = []
   const requiresWorkspaceAction = taskNeedsWorkspaceAction(input.task)
   let noProgressRecoveryUsed = false
+  let noProgressFallbackTargetUsed = false
   const retryConfig: AgentRetryConfig = {
     maxAttempts: input.retryConfig?.maxAttempts ?? AGENT_STREAM_MAX_ATTEMPTS,
     baseDelayMs: input.retryConfig?.baseDelayMs ?? AGENT_STREAM_RETRY_BASE_MS,
@@ -423,7 +551,9 @@ export async function runAgentLoop(input: {
       input.abortSignal,
     )
 
-    const systemPrompt = buildSystemPrompt({
+    const recentWorkspaceFiles = extractRecentWorkspaceFilesFromHistory(sessionHistory)
+
+    let systemPrompt = buildSystemPrompt({
       task: input.task,
       dependenceLevel: input.dependenceLevel,
       twinContextSummary,
@@ -639,18 +769,39 @@ export async function runAgentLoop(input: {
             "Model response had no concrete actions for an implementation task; retrying once with execution-focused guidance.",
           )
 
-          messages = [
-            ...messages,
-            {
-              role: "system",
-              content:
-                "Previous attempt ended without concrete workspace actions. Execute the next concrete step now using tools and avoid plan-only responses.",
-            },
-          ]
+          const recentFilesDirective = buildRecentFilesDirective(input.task, recentWorkspaceFiles)
+
+          systemPrompt = [
+            systemPrompt,
+            "RETRY DIRECTIVE: The previous attempt ended without concrete workspace actions.",
+            "Execute the next concrete implementation step now using tools and avoid plan-only responses.",
+            ...(recentFilesDirective ? [recentFilesDirective] : []),
+          ].join("\n")
           continue
         }
 
-        if (noProgress && noProgressRecoveryUsed) {
+        if (noProgress && noProgressRecoveryUsed && !noProgressFallbackTargetUsed) {
+          noProgressFallbackTargetUsed = true
+          const fallbackTarget = inferDefaultOutputTarget(input.task)
+          const followUpFiles = recentWorkspaceFiles.slice(0, 4)
+          const targetDirective = fallbackTarget
+            ? `FALLBACK OUTPUT TARGET: Use '${fallbackTarget}' in the project root when no explicit file path is provided. Create/update this file now.`
+            : followUpFiles.length > 0
+              ? `FALLBACK OUTPUT TARGET: Use one or more recent session files now: ${followUpFiles.join(", ")}.`
+              : "FALLBACK OUTPUT TARGET: Choose a concrete file path in the workspace and execute the first implementation step now."
+
+          input.onLog(
+            "warn",
+            fallbackTarget
+              ? `No concrete actions yet; retrying with default target '${fallbackTarget}'.`
+              : "No concrete actions yet; retrying with enforced concrete output target.",
+          )
+
+          systemPrompt = [systemPrompt, targetDirective].join("\n")
+          continue
+        }
+
+        if (noProgress) {
           throw new Error(
             "No actionable workspace steps were executed for this task. Please provide a more specific implementation target (file/path/output).",
           )

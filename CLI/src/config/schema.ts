@@ -9,6 +9,7 @@ export const LLMProviderSchema = z.enum([
   "cohere",
   "ollama",
   "azure",
+  "openrouter",
   "openai-compatible",
 ])
 
@@ -32,6 +33,7 @@ export const ProjectConfigSchema = z
     name: z.string(),
     rootDir: z.string(),
     stack: z.array(z.string()),
+    activeSessionId: z.string().optional(),
     dependenceLevel: DependenceLevelSchema,
     llmProvider: LLMProviderSchema,
     model: z.string(),

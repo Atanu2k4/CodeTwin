@@ -102,7 +102,7 @@ async function runInitWizard(): Promise<void> {
     const dependenceRaw = await rl.question("Dependence level (1-5, default 3): ")
     const provider =
       (await rl.question(
-        "LLM provider (openai/anthropic/groq/google/mistral/cohere/ollama/azure/openai-compatible): ",
+        "LLM provider (openai/anthropic/groq/google/mistral/cohere/ollama/azure/openrouter/openai-compatible): ",
       ))
         .trim() || "openai"
     const model = (await rl.question("Model name (e.g. gpt-4o, claude-opus-4-5): ")).trim() || "gpt-4o"
@@ -160,15 +160,26 @@ async function startInteractive(): Promise<void> {
   render(<App />)
 }
 
-async function runTask(taskParts: string[]): Promise<void> {
+async function runTask(
+  taskParts: string[],
+  options?: {
+    sessionId?: string
+    continueLast?: boolean
+    fork?: boolean
+  },
+): Promise<void> {
   await ensureConfigReady()
   const task = taskParts.join(" ").trim()
   if (!task) throw new Error("Task text is required")
 
   const daemonUrl = await ensureDaemonBaseUrl()
-  const session = await apiRequest<{ sessionId: string }>(daemonUrl, "/session/new", {
+  const session = await apiRequest<{ sessionId: string; resumed?: boolean }>(daemonUrl, "/session/new", {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      sessionId: options?.sessionId,
+      continueLast: options?.sessionId ? false : options?.continueLast ?? true,
+      fork: options?.fork ?? false,
+    }),
   })
 
   await apiRequest(daemonUrl, `/session/${session.sessionId}/task`, {
@@ -176,7 +187,7 @@ async function runTask(taskParts: string[]): Promise<void> {
     body: JSON.stringify({ task }),
   })
 
-  console.log(`Task submitted to session ${session.sessionId}`)
+  console.log(`Task submitted to session ${session.sessionId}${session.resumed ? " (resumed)" : ""}`)
 }
 
 async function showStatus(): Promise<void> {
@@ -210,8 +221,16 @@ async function setLevel(levelRaw: string): Promise<void> {
   }
 
   const daemonUrl = await ensureDaemonBaseUrl()
-  const sessions = await apiRequest<{ sessions: Array<{ id: string }> }>(daemonUrl, "/sessions")
-  const first = sessions.sessions[0]
+  const sessions = await apiRequest<{
+    sessions: Array<{
+      id: string
+      status: string
+      runtimeActive?: boolean
+    }>
+  }>(daemonUrl, "/sessions")
+  const first =
+    sessions.sessions.find((session) => session.runtimeActive || session.status === "running" || session.status === "awaiting_approval") ??
+    sessions.sessions[0]
   if (!first) {
     throw new Error("No active session found")
   }
@@ -323,6 +342,152 @@ async function removeConstraintCommand(id: string): Promise<void> {
   console.log(`Removed constraint ${id}`)
 }
 
+async function listSessionsCommand(): Promise<void> {
+  const daemonUrl = await ensureDaemonBaseUrl()
+  const payload = await apiRequest<{
+    sessions: Array<{
+      id: string
+      projectId: string
+      title: string
+      parentId?: string
+      status: string
+      currentTask?: string
+      updatedAt: string
+      runtimeActive: boolean
+    }>
+  }>(daemonUrl, "/sessions")
+
+  if (payload.sessions.length === 0) {
+    console.log("No sessions found.")
+    return
+  }
+
+  for (const session of payload.sessions) {
+    const details = [
+      session.projectId,
+      session.status,
+      session.runtimeActive ? "runtime:active" : "runtime:idle",
+      `updated:${session.updatedAt}`,
+    ]
+    if (session.parentId) {
+      details.push(`parent:${session.parentId}`)
+    }
+
+    console.log(`${session.id} | ${session.title}`)
+    console.log(`  ${details.join(" | ")}`)
+    if (session.currentTask) {
+      console.log(`  task: ${session.currentTask}`)
+    }
+  }
+}
+
+async function deleteSessionCommand(sessionId: string): Promise<void> {
+  const daemonUrl = await ensureDaemonBaseUrl()
+  await apiRequest(daemonUrl, `/session/${sessionId}`, {
+    method: "DELETE",
+  })
+  console.log(`Deleted session ${sessionId}`)
+}
+
+async function useSessionCommand(sessionId: string): Promise<void> {
+  await ensureConfigReady()
+  const daemonUrl = await ensureDaemonBaseUrl()
+
+  const sessions = await apiRequest<{ sessions: Array<{ id: string }> }>(daemonUrl, "/sessions")
+  if (!sessions.sessions.some((session) => session.id === sessionId)) {
+    throw new Error(`Session not found: ${sessionId}`)
+  }
+
+  await apiRequest(daemonUrl, "/config", {
+    method: "PUT",
+    body: JSON.stringify({ activeSessionId: sessionId }),
+  })
+
+  console.log(`Selected active session ${sessionId}`)
+}
+
+async function listProjectsCommand(): Promise<void> {
+  const daemonUrl = await ensureDaemonBaseUrl()
+  const payload = await apiRequest<{
+    projects: Array<{
+      projectId: string
+      name: string
+      rootDir: string
+      stack: string[]
+      createdAt: string
+    }>
+  }>(daemonUrl, "/projects")
+
+  if (payload.projects.length === 0) {
+    console.log("No projects found.")
+    return
+  }
+
+  for (const project of payload.projects) {
+    console.log(`${project.projectId} | ${project.name}`)
+    console.log(`  root: ${project.rootDir}`)
+    console.log(`  stack: ${project.stack.join(", ") || "(none)"}`)
+    console.log(`  created: ${project.createdAt}`)
+  }
+}
+
+async function createProjectCommand(input: {
+  name: string
+  rootDir?: string
+  stack?: string
+  select?: boolean
+}): Promise<void> {
+  const daemonUrl = await ensureDaemonBaseUrl()
+  const stack = input.stack
+    ? input.stack
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+    : undefined
+
+  const payload = await apiRequest<{
+    created: boolean
+    selected: boolean
+    project: {
+      projectId: string
+      name: string
+      rootDir: string
+      stack: string[]
+    }
+  }>(daemonUrl, "/projects/create", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name,
+      rootDir: input.rootDir,
+      stack,
+      select: input.select,
+    }),
+  })
+
+  console.log(`Created project ${payload.project.projectId} (${payload.project.name})`)
+  if (payload.selected) {
+    console.log("Project selected in config.")
+  }
+}
+
+async function selectProjectCommand(projectId: string): Promise<void> {
+  const daemonUrl = await ensureDaemonBaseUrl()
+  const payload = await apiRequest<{
+    selected: boolean
+    project: {
+      projectId: string
+      name: string
+      rootDir: string
+      stack: string[]
+    }
+  }>(daemonUrl, "/projects/select", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  })
+
+  console.log(`Selected project ${payload.project.projectId} (${payload.project.name})`)
+}
+
 function listProviders(): void {
   const providers = [
     { id: "openai", requiresApiKey: true, requiresBaseUrl: false },
@@ -333,6 +498,7 @@ function listProviders(): void {
     { id: "cohere", requiresApiKey: true, requiresBaseUrl: false },
     { id: "ollama", requiresApiKey: false, requiresBaseUrl: true },
     { id: "azure", requiresApiKey: true, requiresBaseUrl: true },
+    { id: "openrouter", requiresApiKey: true, requiresBaseUrl: false },
     { id: "openai-compatible", requiresApiKey: true, requiresBaseUrl: true },
   ]
 
@@ -354,9 +520,88 @@ async function main(): Promise<void> {
   program
     .command("task")
     .description("submit task non-interactively")
+    .option("-c, --continue", "continue the latest session", true)
+    .option("-s, --session <id>", "continue a specific session id")
+    .option("--fork", "fork from the selected/continued session")
+    .option("--new", "always create a fresh session")
     .argument("<task...>")
-    .action(async (taskParts: string[]) => {
-      await runTask(taskParts)
+    .action(
+      async (
+        taskParts: string[],
+        options: {
+          continue?: boolean
+          session?: string
+          fork?: boolean
+          new?: boolean
+        },
+      ) => {
+        await runTask(taskParts, {
+          sessionId: options.session,
+          continueLast: options.new ? false : options.continue ?? true,
+          fork: options.fork,
+        })
+      },
+    )
+
+  const sessionCommand = program.command("session").description("list, select, and delete sessions")
+
+  sessionCommand.command("list").description("list stored sessions").action(async () => {
+    await listSessionsCommand()
+  })
+
+  sessionCommand
+    .command("use")
+    .description("select active session id in config")
+    .argument("<sessionId>")
+    .action(async (sessionId: string) => {
+      await useSessionCommand(sessionId)
+    })
+
+  sessionCommand
+    .command("delete")
+    .description("delete a session and its persisted message history")
+    .argument("<sessionId>")
+    .action(async (sessionId: string) => {
+      await deleteSessionCommand(sessionId)
+    })
+
+  const projectCommand = program.command("project").description("create, list, and select projects")
+
+  projectCommand.command("list").description("list known projects").action(async () => {
+    await listProjectsCommand()
+  })
+
+  projectCommand
+    .command("create")
+    .description("create a new project entry")
+    .argument("<name>")
+    .option("-r, --root-dir <path>", "root directory")
+    .option("-s, --stack <list>", "comma-separated stack values")
+    .option("--select", "select this project in config after creation")
+    .action(
+      async (
+        name: string,
+        options: {
+          rootDir?: string
+          stack?: string
+          select?: boolean
+        },
+      ) => {
+        await createProjectCommand({
+          name,
+          rootDir: options.rootDir,
+          stack: options.stack,
+          select: options.select,
+        })
+      },
+    )
+
+  projectCommand
+    .command("select")
+    .description("select project in config")
+    .argument("<projectId>")
+    .action(async (projectId: string) => {
+      await selectProjectCommand(projectId)
     })
 
   program.command("status").description("show running tasks").action(async () => {

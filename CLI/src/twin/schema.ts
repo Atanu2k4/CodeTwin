@@ -104,6 +104,8 @@ export function applyTwinMigrations(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_decisions_project_time ON decisions (project_id, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_constraints_project ON constraints (project_id);
+    CREATE INDEX IF NOT EXISTS idx_causal_edges_project_from ON causal_edges (project_id, from_decision_id);
+    CREATE INDEX IF NOT EXISTS idx_causal_edges_project_to ON causal_edges (project_id, to_decision_id);
     CREATE INDEX IF NOT EXISTS idx_failures_project_time ON failure_patterns (project_id, timestamp DESC);
   `)
 }

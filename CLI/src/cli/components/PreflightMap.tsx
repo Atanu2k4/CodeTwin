@@ -27,7 +27,7 @@ export function PreflightMapView(props: { map: PreflightMap }): JSX.Element {
       <Text>{`Affected functions: ${map.affectedFunctions.join(", ") || "none"}`}</Text>
       <Text>{`Reasoning: ${map.reasoning}`}</Text>
       <Static items={["[A] Approve   [R] Reject   [M] Modify approach"]}>
-        {(item) => <Text>{item}</Text>}
+        {(item, index) => <Text key={`preflight-action-${index}-${item}`}>{item}</Text>}
       </Static>
     </Box>
   )

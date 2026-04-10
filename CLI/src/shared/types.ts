@@ -8,6 +8,7 @@ export type LLMProvider =
   | "cohere"
   | "ollama"
   | "azure"
+  | "openrouter"
   | "openai-compatible"
 
 // Dependence levels
@@ -19,6 +20,7 @@ export interface ProjectConfig {
   name: string
   rootDir: string
   stack: string[]
+  activeSessionId?: string
   dependenceLevel: DependenceLevel
   llmProvider: LLMProvider
   model: string

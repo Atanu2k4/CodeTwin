@@ -51,6 +51,12 @@ export function buildProvider(config: ProjectConfig): LanguageModel {
     case "azure":
       return createAzure({ apiKey: requireApiKey(config), baseURL: requireBaseUrl(config) })(model)
 
+    case "openrouter":
+      return createOpenAI({
+        apiKey: requireApiKey(config),
+        baseURL: baseUrl ?? "https://openrouter.ai/api/v1",
+      })(model)
+
     case "openai-compatible":
       return createOpenAI({ apiKey: requireApiKey(config), baseURL: requireBaseUrl(config) })(model)
 

@@ -56,7 +56,7 @@ export function useSession(input: {
   pendingDecision: PendingDecision | null
   completionSummary: string | null
   error: string | null
-  createSession: () => Promise<void>
+  createSession: (options?: { sessionId?: string; continueLast?: boolean; fork?: boolean }) => Promise<void>
   submitTask: (task: string) => Promise<void>
   respondPreflight: (decision: "approve" | "reject" | "modify") => Promise<void>
   respondDecision: (answer: string) => Promise<void>
@@ -201,10 +201,14 @@ export function useSession(input: {
     }
   }, [])
 
-  const createSession = useCallback(async () => {
+  const createSession = useCallback(async (options?: { sessionId?: string; continueLast?: boolean; fork?: boolean }) => {
     const response = await input.request<{ sessionId: string; dependenceLevel: number }>("/session/new", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({
+        sessionId: options?.sessionId,
+        continueLast: options?.continueLast ?? true,
+        fork: options?.fork ?? false,
+      }),
     })
 
     setState((prev) => ({

@@ -5,16 +5,23 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/agent_message.dart';
+import '../models/log_entry.dart';
+import '../models/session_status.dart';
 import '../providers/connection_provider.dart';
 import '../providers/session_provider.dart';
 import '../services/socket_service.dart';
 
 class DaemonActions {
-  final DaemonConnectionState connection;
-  final SessionState session;
   final SocketService socketService;
+  final Ref ref;
 
-  DaemonActions(this.connection, this.session, this.socketService);
+  DaemonActions(this.socketService, this.ref);
+
+  DaemonConnectionState get connection =>
+      ref.read(connectionProvider).valueOrNull ?? DaemonConnectionState.empty;
+
+  SessionState get session =>
+      ref.read(sessionProvider).valueOrNull ?? SessionState.empty;
 
   bool get isDaemonConnected => connection.daemonConnected;
 
@@ -38,12 +45,39 @@ class DaemonActions {
 
   // ── public API ───────────────────────────────────────────────────────────
 
-  void submitTask(String task) => _send(MessageType.taskSubmit, {
-        'task': task,
-        'dependenceLevel': session.dependenceLevel,
-      });
+  void submitTask(String task) {
+    ref.read(sessionProvider.notifier).appendLog(LogEntry(
+          id: 'user_input_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now().toIso8601String(),
+          level: AgentLogLevel.info,
+          message: '> Task: $task',
+        ));
 
-  void cancelTask() => _send(MessageType.taskCancel, {});
+    if (!isDaemonConnected) {
+      ref.read(sessionProvider.notifier).appendLog(LogEntry(
+            id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+            timestamp: DateTime.now().toIso8601String(),
+            level: AgentLogLevel.error,
+            message: 'Failed to send task: Agent disconnected. Please connect the CLI daemon first.',
+          ));
+      return;
+    }
+    socketService.sendBridgeCommand({
+      'type': 'cliExecute',
+      'args': ['run', '--task', task],
+      'env': {'CODETWIN_DEPENDENCE_LEVEL': session.dependenceLevel.toString()},
+    });
+  }
+
+  void cancelTask() {
+    if (socketService.activeJobId != null) {
+      socketService.sendBridgeCommand({
+        'type': 'terminate',
+        'jobId': socketService.activeJobId,
+        'signal': 'SIGTERM',
+      });
+    }
+  }
 
   void approve(String awaitingResponseId) => _send(
         MessageType.userApprove,
@@ -71,9 +105,5 @@ class DaemonActions {
 // ---------------------------------------------------------------------------
 
 final daemonActionsProvider = Provider<DaemonActions>((ref) {
-  final connection =
-      ref.watch(connectionProvider).valueOrNull ?? DaemonConnectionState.empty;
-  final session =
-      ref.watch(sessionProvider).valueOrNull ?? SessionState.empty;
-  return DaemonActions(connection, session, SocketService());
+  return DaemonActions(SocketService(), ref);
 });

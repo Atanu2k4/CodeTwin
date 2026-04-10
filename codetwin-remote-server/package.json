@@ -1,0 +1,8 @@
+{
+  "name": "codetwin-remote-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts"
+  }
+}

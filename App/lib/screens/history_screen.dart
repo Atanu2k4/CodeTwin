@@ -12,6 +12,7 @@ class HistoryScreen extends StatelessWidget {
     // History will be populated from daemon GET /sessions when connected.
     // For now, show an empty state.
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(title: const Text('Session History')),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -23,24 +24,46 @@ class HistoryScreen extends StatelessWidget {
             Center(
               child: Column(
                 children: [
-                  Icon(Icons.history,
-                      size: 56, color: theme.colorScheme.outline),
-                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF20B2AA).withValues(alpha: 0.1),
+                      border: Border.all(
+                        color: const Color(0xFF20B2AA).withValues(alpha: 0.2),
+                        width: 2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF20B2AA).withValues(alpha: 0.05),
+                          blurRadius: 20,
+                        ),
+                      ]
+                    ),
+                    child: const Icon(Icons.history,
+                        size: 48,
+                        color: Color(0xFF20B2AA)),
+                  ),
+                  const SizedBox(height: 24),
                   Text(
-                    'No sessions yet',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.outline,
+                    'No Workspaces Found',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 48),
                     child: Text(
-                      'Submit a task from here or your terminal and '
-                      'completed sessions will show up here.',
+                      'Completed iterations and historical sessions will be securely vaulted here.',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 14,
+                        height: 1.5,
                       ),
                     ),
                   ),

@@ -1,22 +1,8 @@
 'use client'
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 
 const Button = () => {
-  const [stars, setStars] = useState<number | string>('..');
-
-  useEffect(() => {
-    fetch('https://api.github.com/repos/Sahnik0/CodeTwin')
-      .then(res => res.json())
-      .then(data => {
-        if (data.stargazers_count !== undefined) {
-          const n = data.stargazers_count;
-          setStars(n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n);
-        }
-      })
-      .catch(() => setStars(3));
-  }, []);
-
   return (
     <a href="https://github.com/Sahnik0/CodeTwin" target="_blank" rel="noopener noreferrer" className="flex overflow-hidden items-center text-sm font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-black text-white shadow hover:bg-black/90 h-10 px-4 py-2 max-w-52 whitespace-pre md:flex group relative w-full justify-center gap-2 rounded-md transition-all duration-300 ease-out hover:ring-2 hover:ring-black hover:ring-offset-2">
       <span className="absolute right-0 -mt-12 h-32 w-8 translate-x-12 rotate-12 bg-white opacity-10 transition-all duration-1000 ease-out group-hover:-translate-x-40" />

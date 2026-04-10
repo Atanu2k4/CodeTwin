@@ -6,6 +6,16 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'framer-motion'],
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'avatars.githubusercontent.com',
+        port: '',
+        pathname: '/**',
+      },
+    ],
+  },
 }
 
 const withMDX = createMDX({

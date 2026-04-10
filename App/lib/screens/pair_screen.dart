@@ -234,10 +234,10 @@ class _PairScreenState extends ConsumerState<PairScreen> {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: primaryColor.withOpacity(0.3), width: 1.5),
+        border: Border.all(color: primaryColor.withValues(alpha: 0.3), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: primaryColor.withOpacity(0.05),
+            color: primaryColor.withValues(alpha: 0.05),
             blurRadius: 20,
             spreadRadius: 5,
           ),
@@ -251,9 +251,18 @@ class _PairScreenState extends ConsumerState<PairScreen> {
           children: [
             MobileScanner(onDetect: _onQrDetect),
             Center(
-              child: CustomPaint(
-                size: const Size(220, 220),
-                painter: _ScannerOverlayPainter(color: primaryColor),
+              child: SizedBox(
+                width: 220,
+                height: 220,
+                child: Stack(
+                  children: [
+                    CustomPaint(
+                      size: const Size(220, 220),
+                      painter: _ScannerOverlayPainter(color: primaryColor),
+                    ),
+                    _AnimatedScannerLaser(color: primaryColor),
+                  ],
+                ),
               ),
             ),
           ],
@@ -413,4 +422,64 @@ class _ScannerOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _AnimatedScannerLaser extends StatefulWidget {
+  final Color color;
+  const _AnimatedScannerLaser({required this.color});
+
+  @override
+  State<_AnimatedScannerLaser> createState() => _AnimatedScannerLaserState();
+}
+
+class _AnimatedScannerLaserState extends State<_AnimatedScannerLaser>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    
+    _animation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOutSine),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _animation,
+      builder: (context, child) {
+        return Positioned(
+          top: 10 + (_animation.value * 198), // 220 box size - margins
+          left: 20,
+          right: 20,
+          child: Container(
+            height: 2,
+            decoration: BoxDecoration(
+              color: widget.color.withValues(alpha: 0.8),
+              boxShadow: [
+                BoxShadow(
+                  color: widget.color,
+                  blurRadius: 10,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

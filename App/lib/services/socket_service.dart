@@ -94,14 +94,14 @@ class SocketService {
     });
 
     _socket!.onDisconnect((_) {
-      debugPrint('[SocketService] Disconnected');
+      if (kDebugMode) debugPrint('[SocketService] Disconnected');
       _stopPingTimer();
       onDisconnected?.call();
       _scheduleReconnect();
     });
 
     _socket!.onError((error) {
-      debugPrint('[SocketService] Error: $error');
+      if (kDebugMode) debugPrint('[SocketService] Error: $error');
     });
 
     _socket!.connect();

@@ -8,13 +8,18 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'services/notifications_service.dart';
 import 'services/socket_service.dart';
 import 'utils/device_id.dart';
+import 'providers/onboarding_provider.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load shared preferences BEFORE app starts
+  final sharedPrefs = await SharedPreferences.getInstance();
 
   // Initialise local notifications
   await NotificationsService().init();
@@ -38,7 +43,9 @@ Future<void> main() async {
 
   runApp(
     ProviderScope(
-      overrides: const [],
+      overrides: [
+        sharedPreferencesProvider.overrideWithValue(sharedPrefs),
+      ],
       child: const App(),
     ),
   );

@@ -42,95 +42,133 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        physics: const BouncingScrollPhysics(),
         children: [
           // ── Pairing ─────────────────────────────────────────────────
-          _sectionHeader(theme, 'Pairing'),
-          ListTile(
-            leading: const Icon(Icons.fingerprint),
-            title: const Text('Device ID'),
-            subtitle: Text(
-              conn.deviceId ?? 'Not paired',
-              style: const TextStyle(fontFamily: 'monospace'),
+          _sectionHeader(theme, 'Pairing & Device'),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161A),
+              borderRadius: BorderRadius.circular(20),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.cloud),
-            title: const Text('Signaling URL'),
-            subtitle: _editingUrl
-                ? TextField(
-                    controller: _urlController,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.check),
-                        onPressed: () {
-                          final url = _urlController.text.trim();
-                          if (url.isNotEmpty) {
-                            ref
-                                .read(connectionProvider.notifier)
-                                .setSignalingUrl(url);
-                            if (conn.deviceId != null) {
-                              SocketService().connect(url, conn.deviceId!);
-                            }
-                          }
-                          setState(() => _editingUrl = false);
-                        },
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.fingerprint, color: Colors.white70),
+                  title: const Text('Device ID', style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                    conn.deviceId ?? 'Not paired',
+                    style: TextStyle(fontFamily: 'monospace', color: Colors.white.withValues(alpha: 0.4)),
+                  ),
+                ),
+                Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
+                ListTile(
+                  leading: const Icon(Icons.cloud, color: Colors.white70),
+                  title: const Text('Signaling URL', style: TextStyle(color: Colors.white)),
+                  subtitle: _editingUrl
+                      ? TextField(
+                          controller: _urlController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: const Color(0xFF20B2AA).withValues(alpha: 0.5))),
+                            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF20B2AA))),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.check, color: Color(0xFF20B2AA)),
+                              onPressed: () {
+                                final url = _urlController.text.trim();
+                                if (url.isNotEmpty) {
+                                  ref
+                                      .read(connectionProvider.notifier)
+                                      .setSignalingUrl(url);
+                                  if (conn.deviceId != null) {
+                                    SocketService().connect(url, conn.deviceId!);
+                                  }
+                                }
+                                setState(() => _editingUrl = false);
+                              },
+                            ),
+                          ),
+                        )
+                      : Text(conn.signalingUrl, style: TextStyle(color: Colors.white.withValues(alpha: 0.4))),
+                  trailing: _editingUrl
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.edit, size: 18, color: Colors.white54),
+                          onPressed: () {
+                            _urlController.text = conn.signalingUrl;
+                            setState(() => _editingUrl = true);
+                          },
+                        ),
+                ),
+                Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
+                ListTile(
+                  leading: const Icon(Icons.sync, color: Colors.white70),
+                  title: const Text('Connection', style: TextStyle(color: Colors.white)),
+                  subtitle: Text(conn.pairingStatus.name, style: TextStyle(color: Colors.white.withValues(alpha: 0.4))),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: conn.daemonConnected ? Colors.teal.withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: conn.daemonConnected ? Colors.teal : Colors.red,
+                        width: 1,
+                      )
+                    ),
+                    child: Text(
+                      conn.daemonConnected ? 'ONLINE' : 'OFFLINE',
+                      style: TextStyle(
+                        color: conn.daemonConnected ? Colors.tealAccent : Colors.redAccent,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   )
-                : Text(conn.signalingUrl),
-            trailing: _editingUrl
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.edit, size: 18),
-                    onPressed: () {
-                      _urlController.text = conn.signalingUrl;
-                      setState(() => _editingUrl = true);
-                    },
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        await clearPairing();
+                        SocketService().disconnect();
+                        ref
+                            .read(connectionProvider.notifier)
+                            .setPairingStatus(
+                                PairingStatus.unpaired);
+                        if (context.mounted) context.go('/pair');
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.5)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        foregroundColor: Colors.redAccent,
+                      ),
+                      icon: const Icon(Icons.link_off),
+                      label: const Text('Disconnect & Re-pair'),
+                    ),
                   ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.sync),
-            title: const Text('Connection'),
-            subtitle: Text(conn.pairingStatus.name),
-            trailing: conn.daemonConnected
-                ? const Chip(
-                    label: Text('Online'),
-                    backgroundColor: Colors.green,
-                    labelStyle: TextStyle(color: Colors.white, fontSize: 12),
-                  )
-                : const Chip(
-                    label: Text('Offline'),
-                    backgroundColor: Colors.grey,
-                    labelStyle: TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: OutlinedButton.icon(
-              onPressed: () async {
-                await clearPairing();
-                SocketService().disconnect();
-                ref
-                    .read(connectionProvider.notifier)
-                    .setPairingStatus(
-                        PairingStatus.unpaired);
-                if (context.mounted) context.go('/pair');
-              },
-              icon: const Icon(Icons.link_off),
-              label: const Text('Re-pair'),
+                ),
+              ]
             ),
           ),
 
-          const Divider(height: 32),
+          const SizedBox(height: 24),
 
           // ── Dependence Level ─────────────────────────────────────────
-          _sectionHeader(theme, 'Dependence Level'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+          _sectionHeader(theme, 'Agent Autonomy'),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161A),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 16),
             child: LevelPicker(
               currentLevel: session.dependenceLevel,
               onChanged: (level) {
@@ -140,30 +178,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
-          const Divider(height: 32),
+          const SizedBox(height: 24),
 
           // ── Notifications ───────────────────────────────────────────
-          _sectionHeader(theme, 'Notifications'),
-          SwitchListTile(
-            title: const Text('Push notifications'),
-            subtitle: const Text(
-              'Receive alerts when the agent needs approval '
-              'or a task completes.',
+          _sectionHeader(theme, 'System'),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161A),
+              borderRadius: BorderRadius.circular(20),
             ),
-            value: notif.enabled,
-            onChanged: (v) =>
-                ref.read(notificationsProvider.notifier).setEnabled(v),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Push notifications', style: TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                    'Receive alerts when the agent needs approval or a task completes.',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+                  ),
+                  activeColor: const Color(0xFF20B2AA),
+                  value: notif.enabled,
+                  onChanged: (v) =>
+                      ref.read(notificationsProvider.notifier).setEnabled(v),
+                ),
+                Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
+                ListTile(
+                  leading: const Icon(Icons.info_outline, color: Colors.white70),
+                  title: const Text('CodeTwin Version', style: TextStyle(color: Colors.white)),
+                  trailing: Text('v1.0.0 (Premium)', style: TextStyle(color: Colors.white.withValues(alpha: 0.4))),
+                ),
+              ]
+            ),
           ),
-
-          const Divider(height: 32),
-
-          // ── About ───────────────────────────────────────────────────
-          _sectionHeader(theme, 'About'),
-          const ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('CodeTwin'),
-            subtitle: Text('v1.0.0'),
-          ),
+          const SizedBox(height: 32),
         ],
       ),
     );
@@ -171,12 +217,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Widget _sectionHeader(ThemeData theme, String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+      padding: const EdgeInsets.fromLTRB(4, 0, 16, 8),
       child: Text(
-        title,
-        style: theme.textTheme.labelLarge?.copyWith(
-          color: theme.colorScheme.primary,
-          fontWeight: FontWeight.w600,
+        title.toUpperCase(),
+        style: const TextStyle(
+          color: Color(0xFF20B2AA),
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.5,
         ),
       ),
     );

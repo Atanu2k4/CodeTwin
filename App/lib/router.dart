@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'providers/connection_provider.dart';
+import 'providers/onboarding_provider.dart';
 import 'screens/pair_screen.dart';
 import 'screens/shell_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
+import 'screens/onboarding_screen.dart';
 import 'screens/modals/preflight_modal.dart';
 import 'screens/modals/decision_modal.dart';
 
@@ -19,23 +21,33 @@ final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final routerProvider = Provider<GoRouter>((ref) {
   final connection = ref.watch(connectionProvider);
+  final isOnboarded = ref.watch(onboardingProvider);
 
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
     redirect: (context, state) {
       final isPaired = connection.valueOrNull?.deviceId != null;
-      final isOnPairPage = state.matchedLocation == '/pair';
+      final isGoingToPairPage = state.matchedLocation == '/pair';
+      final isGoingToOnboarding = state.matchedLocation == '/onboarding';
 
-      if (!isPaired && !isOnPairPage) return '/pair';
-      if (isPaired && isOnPairPage) return '/dashboard';
+      if (!isOnboarded && !isGoingToOnboarding) return '/onboarding';
+      if (isOnboarded && !isPaired && !isGoingToPairPage) return '/pair';
+      if (isPaired && (isGoingToPairPage || isGoingToOnboarding)) return '/dashboard';
+      
       return null;
     },
     routes: [
-      // Redirect root to dashboard
+      // Redirect root appropriately (redirect logic catches it, defaults to dashboard)
       GoRoute(
         path: '/',
         redirect: (_, __) => '/dashboard',
+      ),
+
+      // Onboarding screen
+      GoRoute(
+        path: '/onboarding',
+        builder: (_, __) => const OnboardingScreen(),
       ),
 
       // Pairing screen (outside shell)
@@ -45,8 +57,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       // Main app shell with bottom nav
-      StatefulShellRoute.indexedStack(
+      StatefulShellRoute(
         parentNavigatorKey: _rootNavigatorKey,
+        navigatorContainerBuilder: (context, navigationShell, children) {
+          return SwipeableShellContainer(
+            navigationShell: navigationShell,
+            children: children,
+          );
+        },
         builder: (context, state, shell) => ShellScreen(shell: shell),
         branches: [
           StatefulShellBranch(

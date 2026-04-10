@@ -5,7 +5,6 @@ import { ChevronDown } from 'lucide-react'
 import { motion, useScroll, useTransform } from 'framer-motion'
 import { Suspense } from 'react'
 import InstallStrip from './InstallStrip'
-import CircuitPattern from './CircuitPattern'
 import BorderGlow from './BorderGlow'
 import GitHubStarBadge from './GitHubStarBadge'
 
@@ -30,9 +29,6 @@ export default function HeroSection() {
         }}
         aria-hidden="true"
       />
-
-      {/* Decorative circuit pattern */}
-      <CircuitPattern variant="top-right" className="opacity-50" />
 
       <div className="relative z-10 flex flex-col items-center text-center max-w-4xl w-full">
         {/* Eyebrow badge */}

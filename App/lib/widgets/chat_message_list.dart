@@ -58,9 +58,85 @@ class _ChatMessageListState extends State<ChatMessageList> {
         
         return Align(
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-          child: _ChatBubble(entry: entry, isUser: isUser),
+          child: _AnimatedChatBubble(
+            key: ValueKey(entry.id),
+            entry: entry,
+            isUser: isUser,
+          ),
         );
       },
+    );
+  }
+}
+
+class _AnimatedChatBubble extends StatefulWidget {
+  final LogEntry entry;
+  final bool isUser;
+
+  const _AnimatedChatBubble({
+    Key? key,
+    required this.entry,
+    required this.isUser,
+  }) : super(key: key);
+
+  @override
+  State<_AnimatedChatBubble> createState() => _AnimatedChatBubbleState();
+}
+
+class _AnimatedChatBubbleState extends State<_AnimatedChatBubble>
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scaleAnimation;
+  late final Animation<Offset> _slideAnimation;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+
+    // Bouncy scale for that iOS SMS feel
+    _scaleAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.elasticOut,
+    );
+
+    // Slide up slightly
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0.0, 0.2),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return FadeTransition(
+      opacity: _controller,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: ScaleTransition(
+          scale: _scaleAnimation,
+          alignment: widget.isUser ? Alignment.bottomRight : Alignment.bottomLeft,
+          child: _ChatBubble(entry: widget.entry, isUser: widget.isUser),
+        ),
+      ),
     );
   }
 }

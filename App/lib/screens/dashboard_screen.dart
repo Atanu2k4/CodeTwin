@@ -33,172 +33,182 @@ class DashboardScreen extends ConsumerWidget {
       children: [
         // ── Scrollable Area ──────────────────────────────────────
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.only(bottom: 24),
-            child: AnimatedSize(
-              duration: const Duration(milliseconds: 350),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // ── Top: session status ──────────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ── Top: session status ──────────────────────────────────────
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SessionStatusBadge(status: session.status),
-                            const Spacer(),
-                            if (session.status == SessionStatus.running)
-                              TextButton.icon(
-                                onPressed: () => actions.cancelTask(),
-                                icon: const Icon(Icons.stop, size: 18),
-                                label: const Text('Cancel'),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: Colors.red,
+                            Row(
+                              children: [
+                                SessionStatusBadge(status: session.status),
+                                const Spacer(),
+                                if (session.status == SessionStatus.running)
+                                  TextButton.icon(
+                                    onPressed: () => actions.cancelTask(),
+                                    icon: const Icon(Icons.stop, size: 18),
+                                    label: const Text('Cancel'),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (session.currentTask != null) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                session.currentTask!,
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+
+                      // ── Middle: active cards ─────────────────────────────────────
+
+                      // Preflight queue
+                      if (session.preflightQueue.isNotEmpty)
+                        PreflightCard(
+                          item: session.preflightQueue.first,
+                          onApprove: (id) {
+                            actions.approve(id);
+                            ref.read(sessionProvider.notifier).resolvePreflight(id);
+                          },
+                          onReject: (id) {
+                            actions.reject(id);
+                            ref.read(sessionProvider.notifier).resolvePreflight(id);
+                          },
+                          onModify: (id, text) {
+                            actions.answer(id, text);
+                            ref.read(sessionProvider.notifier).resolvePreflight(id);
+                          },
+                        ),
+
+                      // Decision queue
+                      if (session.decisionQueue.isNotEmpty)
+                        DecisionCard(
+                          item: session.decisionQueue.first,
+                          onAnswer: (id, answer) {
+                            actions.answer(id, answer);
+                            ref.read(sessionProvider.notifier).resolveDecision(id);
+                          },
+                          onReject: (id) {
+                            actions.reject(id);
+                            ref.read(sessionProvider.notifier).resolveDecision(id);
+                          },
+                        ),
+
+                      // Last completed task summary
+                      if (session.lastComplete != null &&
+                          session.status == SessionStatus.idle) ...[
+                        Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          color: Colors.green.withValues(alpha: 0.08),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.check_circle,
+                                        color: Colors.green, size: 20),
+                                    const SizedBox(width: 8),
+                                    Text('Last task completed',
+                                        style: theme.textTheme.titleSmall),
+                                  ],
                                 ),
-                              ),
-                          ],
-                        ),
-                        if (session.currentTask != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            session.currentTask!,
-                            style: theme.textTheme.bodyMedium,
+                                const SizedBox(height: 8),
+                                Text(session.lastComplete!.summary),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${session.lastComplete!.filesChanged.length} files changed • '
+                                  '${formatDurationMs(session.lastComplete!.durationMs)}',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.outline,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
+                        ),
                       ],
-                    ),
-                  ),
 
-                  // ── Middle: active cards ─────────────────────────────────────
-
-                  // Preflight queue
-                  if (session.preflightQueue.isNotEmpty)
-                    PreflightCard(
-                      item: session.preflightQueue.first,
-                      onApprove: (id) {
-                        actions.approve(id);
-                        ref.read(sessionProvider.notifier).resolvePreflight(id);
-                      },
-                      onReject: (id) {
-                        actions.reject(id);
-                        ref.read(sessionProvider.notifier).resolvePreflight(id);
-                      },
-                      onModify: (id, text) {
-                        actions.answer(id, text);
-                        ref.read(sessionProvider.notifier).resolvePreflight(id);
-                      },
-                    ),
-
-                  // Decision queue
-                  if (session.decisionQueue.isNotEmpty)
-                    DecisionCard(
-                      item: session.decisionQueue.first,
-                      onAnswer: (id, answer) {
-                        actions.answer(id, answer);
-                        ref.read(sessionProvider.notifier).resolveDecision(id);
-                      },
-                      onReject: (id) {
-                        actions.reject(id);
-                        ref.read(sessionProvider.notifier).resolveDecision(id);
-                      },
-                    ),
-
-                  // Last completed task summary
-                  if (session.lastComplete != null &&
-                      session.status == SessionStatus.idle) ...[
-                    Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      color: Colors.green.withValues(alpha: 0.08),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                      // Last failed task
+                      if (session.lastFailed != null &&
+                          session.status == SessionStatus.failed) ...[
+                        Card(
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          color: Colors.red.withValues(alpha: 0.08),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.check_circle,
-                                    color: Colors.green, size: 20),
-                                const SizedBox(width: 8),
-                                Text('Last task completed',
-                                    style: theme.textTheme.titleSmall),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.error, color: Colors.red, size: 20),
+                                    const SizedBox(width: 8),
+                                    Text('Task failed',
+                                        style: theme.textTheme.titleSmall),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(session.lastFailed!.error),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            Text(session.lastComplete!.summary),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${session.lastComplete!.filesChanged.length} files changed • '
-                              '${formatDurationMs(session.lastComplete!.durationMs)}',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.outline,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  // Last failed task
-                  if (session.lastFailed != null &&
-                      session.status == SessionStatus.failed) ...[
-                    Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      color: Colors.red.withValues(alpha: 0.08),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.error, color: Colors.red, size: 20),
-                                const SizedBox(width: 8),
-                                Text('Task failed',
-                                    style: theme.textTheme.titleSmall),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(session.lastFailed!.error),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  // Show Chat instead of raw logs
-                  if (session.logs.isNotEmpty &&
-                      session.preflightQueue.isEmpty &&
-                      session.decisionQueue.isEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Text('Task Progress', style: theme.textTheme.titleSmall),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: () => context.go('/logs'),
-                            child: const Text('View Raw Logs →'),
                           ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(
-                      height: 300,
+                        ),
+                      ],
+
+                      // Show Chat instead of raw logs
+                      if (session.logs.isNotEmpty &&
+                          session.preflightQueue.isEmpty &&
+                          session.decisionQueue.isEmpty) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            children: [
+                              Text('Task Progress', style: theme.textTheme.titleSmall),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: () => context.go('/logs'),
+                                child: const Text('View Raw Logs →'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // Chat fills the remaining scroll view when keyboard is up or naturally
+                if (session.logs.isNotEmpty &&
+                    session.preflightQueue.isEmpty &&
+                    session.decisionQueue.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: true,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 24),
                       child: ChatMessageList(logs: session.logs),
                     ),
-                  ],
-                ],
-              ),
+                  ),
+              ],
             ),
           ),
         ),

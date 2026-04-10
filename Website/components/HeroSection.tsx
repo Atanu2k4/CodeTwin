@@ -70,15 +70,20 @@ export default function HeroSection() {
 
         {/* Sub-headline */}
         <motion.p
-          className="text-text-secondary max-w-[520px] mx-auto leading-relaxed mb-10"
+          className="text-text-secondary max-w-[820px] mx-auto leading-relaxed mb-10"
           style={{ fontSize: '1.0625rem' }}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.38, duration: 0.5, ease: easeOut }}
         >
-          CodeTwin is a terminal-first AI coding agent that runs entirely on your
-          machine. BYOK. Zero telemetry. Five autonomy levels. You decide how
-          autonomous it gets.
+          <span className="hidden lg:block">
+            CodeTwin is a terminal-first AI coding agent that runs entirely on your machine.
+            <br />
+            BYOK. Zero telemetry. Five autonomy levels. You decide how autonomous it gets.
+          </span>
+          <span className="lg:hidden">
+            CodeTwin is a terminal-first AI coding agent that runs entirely on your machine. BYOK. Zero telemetry. Five autonomy levels. You decide how autonomous it gets.
+          </span>
         </motion.p>
 
         {/* CTA row */}

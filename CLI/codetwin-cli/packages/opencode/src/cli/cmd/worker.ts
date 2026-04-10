@@ -232,6 +232,11 @@ export const WorkerCommand = cmd({
 
       running.set(jobId, proc)
 
+      // Close stdin immediately so the spawned process receives EOF.
+      // run.ts does `Bun.stdin.text()` when stdin is not a TTY (pipe mode),
+      // which blocks forever unless stdin is closed.
+      proc.stdin?.end()
+
       safeSend(ws, {
         type: "start",
         jobId,

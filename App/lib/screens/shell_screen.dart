@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/session_provider.dart';
 import '../widgets/daemon_status_bar.dart';
+import '../theme/cli_theme.dart';
+
 
 class SwipeableShellContainer extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
@@ -51,7 +53,6 @@ class _SwipeableShellContainerState extends State<SwipeableShellContainer> {
       controller: _pageController,
       physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       onPageChanged: (index) {
-        // Keeps router correctly synced with the physical swipe movement
         widget.navigationShell.goBranch(
           index,
           initialLocation: index == widget.navigationShell.currentIndex,
@@ -75,83 +76,300 @@ class ShellScreen extends ConsumerWidget {
         ? 0
         : session.preflightQueue.length + session.decisionQueue.length;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Positioned.fill(child: shell),
-            const Positioned(
-              bottom: 16,
-              right: 16,
-              child: DaemonStatusBar(),
+    return CliTheme(
+      level: session?.dependenceLevel ?? 1,
+      child: Builder(builder: (context) {
+        final cli = CliTheme.of(context);
+        return Scaffold(
+          backgroundColor: cli.bg,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(child: shell),
+                const Positioned(
+                  bottom: 16,
+                  right: 16,
+                  child: DaemonStatusBar(),
+                ),
+              ],
             ),
-          ],
+          ),
+          bottomNavigationBar: RepaintBoundary(
+            child: Container(
+              decoration: BoxDecoration(
+                color: cli.bg,
+                border: Border(top: BorderSide(color: cli.border, width: 1)),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _CliNavItem(
+                        label: 'DASHBOARD',
+                        icon: Icons.terminal,
+                        isSelected: shell.currentIndex == 0,
+                        onTap: () => _onTap(context, 0),
+                      ),
+                      _CliNavItem(
+                        label: 'LOGS',
+                        icon: Icons.list_alt_outlined,
+                        isSelected: shell.currentIndex == 1,
+                        badgeCount: badgeCount,
+                        onTap: () => _onTap(context, 1),
+                      ),
+                      _CliNavItem(
+                        label: 'HISTORY',
+                        icon: Icons.history_outlined,
+                        isSelected: shell.currentIndex == 2,
+                        onTap: () => _onTap(context, 2),
+                      ),
+                      _CliNavItem(
+                        label: 'SETTINGS',
+                        icon: Icons.settings_outlined,
+                        isSelected: shell.currentIndex == 3,
+                        onTap: () => _onTap(context, 3),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  void _onTap(BuildContext context, int index) {
+    shell.goBranch(index, initialLocation: index == shell.currentIndex);
+  }
+}
+
+// ── Nav item ──────────────────────────────────────────────────────────────────
+// Optimisations:
+//  • AnimationController drives a single 0→1 value; all derived values
+//    (scale, color, underline width) are computed from it via Tween — no
+//    AnimatedBuilder wrapping the whole Column.
+//  • ScaleTransition on the icon only  (GPU-composited, no layout pass).
+//  • Color lerp via ColorTween evaluated once per frame, not AnimatedDefaultTextStyle.
+//  • Text label uses a pre-built string switch — no re-layout on every tick.
+//  • RepaintBoundary isolates each item's repaints from its siblings.
+class _CliNavItem extends StatefulWidget {
+  final String label;
+  final IconData icon;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final int badgeCount;
+
+  const _CliNavItem({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
+
+  @override
+  State<_CliNavItem> createState() => _CliNavItemState();
+}
+
+class _CliNavItemState extends State<_CliNavItem>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  // Tween-driven values — evaluated once per frame inside AnimatedBuilder
+  // but scoped only to the widgets that actually change.
+  late final Animation<double> _scale;
+  late final Animation<double> _underlineWidth;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      value: widget.isSelected ? 1.0 : 0.0,
+    );
+
+    _scale = Tween<double>(begin: 1.0, end: 1.18).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack),
+    );
+
+    _underlineWidth = Tween<double>(begin: 0, end: 20).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _CliNavItem old) {
+    super.didUpdateWidget(old);
+    if (widget.isSelected != old.isSelected) {
+      widget.isSelected ? _ctrl.forward() : _ctrl.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  // Label strings are pre-built — no string interpolation on each rebuild.
+  String get _activeLabel  => '[ ${widget.label} ]';
+  String get _inactiveLabel => widget.label;
+
+  @override
+  Widget build(BuildContext context) {
+    final cli = CliTheme.of(context);
+
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Icon: only this subtree scales ──────────────────────
+              Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  ScaleTransition(
+                    scale: _scale,
+                    child: _AnimatedIconColor(
+                      animation: _ctrl,
+                      icon: widget.icon,
+                      fromColor: cli.textDim,
+                      toColor: cli.accent,
+                    ),
+                  ),
+                  if (widget.badgeCount > 0)
+                    Positioned(
+                      right: -6,
+                      top: -6,
+                      child: _Badge(count: widget.badgeCount, color: cli.accent, bg: cli.bg),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 4),
+
+              // ── Label: only text color animates, layout is stable ───
+              _AnimatedLabel(
+                animation: _ctrl,
+                activeLabel: _activeLabel,
+                inactiveLabel: _inactiveLabel,
+                fromColor: cli.textDim,
+                toColor: cli.accent,
+                mono: cli.mono,
+              ),
+
+              const SizedBox(height: 3),
+
+              // ── Underline: width animates via AnimatedBuilder ────────
+              AnimatedBuilder(
+                animation: _underlineWidth,
+                builder: (_, __) => SizedBox(
+                  width: _underlineWidth.value,
+                  height: 2,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(color: cli.accent),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      bottomNavigationBar: NavigationBarTheme(
-        data: NavigationBarThemeData(
-          backgroundColor: const Color(0xFF08080A), // Deep dark matching background
-          indicatorColor: Colors.tealAccent.withValues(alpha: 0.15),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF20B2AA),
-                letterSpacing: 0.5,
-              );
-            }
-            return TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Colors.white.withValues(alpha: 0.4),
-              letterSpacing: 0.5,
-            );
-          }),
-          iconTheme: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return const IconThemeData(color: Color(0xFF20B2AA), size: 26);
-            }
-            return IconThemeData(
-                color: Colors.white.withValues(alpha: 0.4), size: 24);
-          }),
+    );
+  }
+}
+
+// ── Colour-animating icon (no layout, pure paint) ─────────────────────────────
+class _AnimatedIconColor extends AnimatedWidget {
+  final IconData icon;
+  final Color fromColor;
+  final Color toColor;
+
+  const _AnimatedIconColor({
+    required Animation<double> animation,
+    required this.icon,
+    required this.fromColor,
+    required this.toColor,
+  }) : super(listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = (listenable as Animation<double>).value;
+    return Icon(
+      icon,
+      color: Color.lerp(fromColor, toColor, t),
+      size: 24,
+    );
+  }
+}
+
+// ── Label with animated colour + crossfade between active/inactive strings ────
+class _AnimatedLabel extends AnimatedWidget {
+  final String activeLabel;
+  final String inactiveLabel;
+  final Color fromColor;
+  final Color toColor;
+  final TextStyle mono;
+
+  const _AnimatedLabel({
+    required Animation<double> animation,
+    required this.activeLabel,
+    required this.inactiveLabel,
+    required this.fromColor,
+    required this.toColor,
+    required this.mono,
+  }) : super(listenable: animation);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = (listenable as Animation<double>).value;
+    final color = Color.lerp(fromColor, toColor, t)!;
+    final isActive = t > 0.5;
+
+    return Text(
+      isActive ? activeLabel : inactiveLabel,
+      style: mono.copyWith(
+        color: color,
+        fontSize: 9,
+        fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+      ),
+    );
+  }
+}
+
+// ── Badge ─────────────────────────────────────────────────────────────────────
+class _Badge extends StatelessWidget {
+  final int count;
+  final Color color;
+  final Color bg;
+
+  const _Badge({required this.count, required this.color, required this.bg});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+      child: Text(
+        '$count',
+        style: TextStyle(
+          color: bg,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'monospace',
         ),
-        child: NavigationBar(
-          selectedIndex: shell.currentIndex,
-          elevation: 0,
-          onDestinationSelected: (index) {
-            shell.goBranch(
-              index,
-              initialLocation: index == shell.currentIndex,
-            );
-          },
-          destinations: [
-            const NavigationDestination(
-              icon: Icon(Icons.dashboard_outlined),
-              selectedIcon: Icon(Icons.dashboard),
-              label: 'Dashboard',
-            ),
-            NavigationDestination(
-              icon: Badge(
-                isLabelVisible: badgeCount > 0,
-                label: Text('$badgeCount'),
-                backgroundColor: const Color(0xFF20B2AA),
-                child: const Icon(Icons.list_alt),
-              ),
-              label: 'Logs',
-            ),
-            const NavigationDestination(
-              icon: Icon(Icons.history_outlined),
-              selectedIcon: Icon(Icons.history),
-              label: 'History',
-            ),
-            const NavigationDestination(
-              icon: Icon(Icons.settings_outlined),
-              selectedIcon: Icon(Icons.settings),
-              label: 'Settings',
-            ),
-          ],
-        ),
+        textAlign: TextAlign.center,
       ),
     );
   }

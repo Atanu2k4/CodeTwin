@@ -29,9 +29,13 @@ class DashboardScreen extends ConsumerWidget {
 
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
           // ── Top: session status ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(16),
@@ -211,6 +215,7 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ],
         ],
+      ),
       ),
     );
   }

@@ -18,11 +18,13 @@ class ShellScreen extends ConsumerWidget {
         session.preflightQueue.length + session.decisionQueue.length;
 
     return Scaffold(
-      body: Column(
-        children: [
-          const DaemonStatusBar(),
-          Expanded(child: shell),
-        ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            const DaemonStatusBar(),
+            Expanded(child: shell),
+          ],
+        ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: shell.currentIndex,

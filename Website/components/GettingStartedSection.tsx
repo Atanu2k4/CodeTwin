@@ -39,6 +39,16 @@ interface GitHubContributor {
   contributions: number
 }
 
+interface GitHubContributorStats {
+  total: number
+  author: {
+    id: number
+    login: string
+    avatar_url: string
+    html_url: string
+  } | null
+}
+
 const easeOut = [0.16, 1, 0.3, 1] as const
 const CONTRIBUTORS_REFRESH_INTERVAL_MS = 60_000
 
@@ -69,18 +79,34 @@ export default function GettingStartedSection() {
     const fetchContributors = async () => {
       try {
         const response = await fetch(
-          `https://api.github.com/repos/Sahnik0/CodeTwin/contributors?per_page=5&t=${Date.now()}`,
+          `https://api.github.com/repos/Sahnik0/CodeTwin/stats/contributors?t=${Date.now()}`,
           { cache: 'no-store' }
         )
+
+        if (response.status === 202) {
+          return
+        }
 
         if (!response.ok) {
           return
         }
 
-        const data = await response.json()
+        const data: GitHubContributorStats[] = await response.json()
 
-        if (isMounted && Array.isArray(data)) {
-          setContributors(data)
+        const topContributors = data
+          .filter((entry): entry is GitHubContributorStats & { author: NonNullable<GitHubContributorStats['author']> } => Boolean(entry.author))
+          .map((entry) => ({
+            id: entry.author.id,
+            login: entry.author.login,
+            avatar_url: entry.author.avatar_url,
+            html_url: entry.author.html_url,
+            contributions: entry.total,
+          }))
+          .sort((a, b) => b.contributions - a.contributions)
+          .slice(0, 5)
+
+        if (isMounted && topContributors.length > 0) {
+          setContributors(topContributors)
           setLastSyncedAt(Date.now())
         }
       } catch (err) {

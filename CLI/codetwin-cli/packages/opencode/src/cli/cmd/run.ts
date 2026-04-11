@@ -622,6 +622,11 @@ export const RunCommand = cmd({
               return
             }
 
+            if (decision.type === "USER_ANSWER" && normalizePermissionReply(decision.answer) === "reject") {
+              resolve({ type: "reject" })
+              return
+            }
+
             const answers = parseQuestionAnswers({
               answer: decision.type === "USER_ANSWER" ? decision.answer : undefined,
               questionCount: input.questionCount,
@@ -834,6 +839,9 @@ export const RunCommand = cmd({
               first?.options
                 ?.map((item) => (typeof item.label === "string" ? item.label.trim() : ""))
                 .filter(Boolean) ?? []
+            if (!options.some((item) => normalizePermissionReply(item) === "reject")) {
+              options.push("Reject")
+            }
 
             if (skip) {
               const answers = parseQuestionAnswers({

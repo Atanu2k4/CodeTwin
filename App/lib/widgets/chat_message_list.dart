@@ -55,6 +55,20 @@ class _ChatMessageListState extends State<ChatMessageList> {
       itemBuilder: (context, index) {
         final entry = widget.logs[index];
         final isUser = entry.message.startsWith('> Task:') || entry.message.startsWith('> Answer:');
+
+        if (!isUser && entry.structuredType == 'reasoning') {
+          return _ThinkingEventCard(entry: entry);
+        }
+
+        if (!isUser &&
+            (entry.structuredType == 'step_start' ||
+                entry.structuredType == 'step_finish')) {
+          return _StepEventCard(entry: entry);
+        }
+
+        if (!isUser && entry.structuredType == 'tool_use') {
+          return _StepEventCard(entry: entry, isToolEvent: true);
+        }
         
         return Align(
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -175,9 +189,17 @@ class _ChatBubble extends StatelessWidget {
 
     IconData? leftIcon;
     if (!isUser) {
-      if (entry.level == AgentLogLevel.tool) leftIcon = Icons.build_circle_outlined;
-      else if (entry.level == AgentLogLevel.error) leftIcon = Icons.error_outline;
-      else if (entry.level == AgentLogLevel.info) leftIcon = Icons.info_outline;
+      if (entry.structuredType == 'text') {
+        leftIcon = null;
+      } else if (entry.level == AgentLogLevel.tool) {
+        leftIcon = Icons.build_circle_outlined;
+      } else if (entry.level == AgentLogLevel.error) {
+        leftIcon = Icons.error_outline;
+      } else if (entry.level == AgentLogLevel.warn) {
+        leftIcon = Icons.warning_amber_rounded;
+      } else if (entry.level == AgentLogLevel.info) {
+        leftIcon = Icons.info_outline;
+      }
     }
 
     return ConstrainedBox(
@@ -231,6 +253,160 @@ class _ChatBubble extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StepEventCard extends StatelessWidget {
+  final LogEntry entry;
+  final bool isToolEvent;
+
+  const _StepEventCard({required this.entry, this.isToolEvent = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final cli = CliTheme.of(context);
+    final isStart = entry.structuredType == 'step_start';
+
+    final icon = isToolEvent
+        ? Icons.build_circle_outlined
+        : isStart
+            ? Icons.play_arrow_rounded
+            : Icons.check_circle_outline;
+
+    final title = isToolEvent
+        ? 'Tool Event'
+        : isStart
+            ? 'Step Started'
+            : 'Step Completed';
+
+    return Container(
+      margin: const EdgeInsets.only(right: 36),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cli.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cli.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: cli.textDim),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: cli.mono.copyWith(
+                    color: cli.textDim,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  entry.message,
+                  style: cli.mono.copyWith(
+                    color: cli.text,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThinkingEventCard extends StatelessWidget {
+  final LogEntry entry;
+
+  const _ThinkingEventCard({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final cli = CliTheme.of(context);
+    final text = entry.message.trim();
+    final preview = text.length > 90 ? '${text.substring(0, 90)}...' : text;
+
+    return Container(
+      margin: const EdgeInsets.only(right: 24),
+      decoration: BoxDecoration(
+        color: cli.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cli.border),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          collapsedIconColor: cli.textDim,
+          iconColor: cli.accent,
+          title: Row(
+            children: [
+              Icon(Icons.psychology_alt_outlined, size: 16, color: cli.textDim),
+              const SizedBox(width: 8),
+              Text(
+                'Thinking',
+                style: cli.mono.copyWith(
+                  color: cli.textDim,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Text(
+            preview,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: cli.mono.copyWith(
+              color: cli.textDim,
+              fontSize: 11,
+            ),
+          ),
+          children: [
+            _TypewriterText(
+              text: text,
+              style: cli.mono.copyWith(
+                color: cli.text,
+                fontSize: 12,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TypewriterText extends StatelessWidget {
+  final String text;
+  final TextStyle? style;
+
+  const _TypewriterText({required this.text, this.style});
+
+  @override
+  Widget build(BuildContext context) {
+    final durationMs = (text.length * 14).clamp(300, 1800);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: durationMs),
+      curve: Curves.easeOut,
+      builder: (context, value, _) {
+        final visible = (text.length * value).floor().clamp(0, text.length);
+        final current = text.substring(0, visible);
+        return Text(current, style: style);
+      },
     );
   }
 }

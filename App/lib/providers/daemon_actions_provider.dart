@@ -12,6 +12,11 @@ import '../providers/connection_provider.dart';
 import '../providers/session_provider.dart';
 import '../services/socket_service.dart';
 
+final RegExp _writeIntentPattern = RegExp(
+  r'\b(create|make|write|edit|modify|update|delete|remove|rename|move|add|patch|save)\b|\.(txt|md|json|yaml|yml|toml|dart|ts|js)\b',
+  caseSensitive: false,
+);
+
 class DaemonActions {
   final SocketService socketService;
   final Ref ref;
@@ -55,8 +60,8 @@ class DaemonActions {
     debugPrint('[DaemonActions] activeJobId=${socketService.activeJobId}');
     // ────────────────────────────────────────────────────────────────────────
 
-        final level = session.dependenceLevel.clamp(1, 5).toInt();
-        final profile = executionProfileForLevel(level);
+      final level = session.dependenceLevel.clamp(1, 5).toInt();
+      final profile = executionProfileForLevel(level);
 
     ref.read(sessionProvider.notifier).appendLog(LogEntry(
           id: 'user_input_${DateTime.now().millisecondsSinceEpoch}',
@@ -77,16 +82,36 @@ class DaemonActions {
           ));
       return;
     }
+
+    if (level <= 2 && _writeIntentPattern.hasMatch(task)) {
+      ref.read(sessionProvider.notifier).appendLog(
+            LogEntry(
+              id: 'warn_level_${DateTime.now().millisecondsSinceEpoch}',
+              timestamp: DateTime.now().toIso8601String(),
+              level: AgentLogLevel.info,
+              message:
+                  'Write-like task detected. Waiting for explicit approval prompts at this dependence level.',
+              source: LogSource.local,
+            ),
+          );
+    }
+
+    final args = <String>[
+      'run',
+      if (session.sessionId != null && session.sessionId!.isNotEmpty) ...[
+        '--session',
+        session.sessionId!,
+      ],
+      task,
+      if (level >= 5) '--dangerously-skip-permissions',
+      '--dependence-level',
+      level.toString(),
+    ];
+
     debugPrint('[DaemonActions] SENDING cliExecute to bridge...');
     socketService.sendBridgeCommand({
       'type': 'cliExecute',
-      'args': [
-        'run',
-        task,
-        '--dangerously-skip-permissions',
-        '--dependence-level',
-        level.toString(),
-      ],
+      'args': args,
       'env': {'CODETWIN_DEPENDENCE_LEVEL': level.toString()},
       'interactive': profile.interactive,
       'streamFormat': profile.streamFormat,

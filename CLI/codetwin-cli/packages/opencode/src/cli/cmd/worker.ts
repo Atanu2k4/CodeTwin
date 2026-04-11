@@ -281,6 +281,9 @@ export const WorkerCommand = cmd({
               }
 
               parseCliEvents = true
+              // Keep stdin open so the mobile client can send approval/reject
+              // responses for permission prompts during a run session.
+              keepStdinOpen = true
             }
 
             // Standardize background execution:

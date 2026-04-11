@@ -68,10 +68,25 @@ String _stepFinishSummary(Map<String, dynamic>? part) {
   if (part == null) return 'Step completed';
   final reason = _asString(part['reason']);
   final tokens = _asMap(part['tokens']);
+  final input = tokens == null ? null : tokens['input'];
   final output = tokens == null ? null : tokens['output'];
-  final suffix = output is num ? ' · output tokens: $output' : '';
-  if (reason != null) return 'Step completed ($reason)$suffix';
-  return 'Step completed$suffix';
+  final reasoning = tokens == null ? null : tokens['reasoning'];
+
+  final cache = tokens == null ? null : _asMap(tokens['cache']);
+  final cacheRead = cache == null ? null : cache['read'];
+  final cacheWrite = cache == null ? null : cache['write'];
+
+  final parts = <String>[];
+  if (input is num) parts.add('in $input');
+  if (output is num) parts.add('out $output');
+  if (reasoning is num) parts.add('reason $reasoning');
+  if (cacheRead is num) parts.add('cache read $cacheRead');
+  if (cacheWrite is num) parts.add('cache write $cacheWrite');
+
+  final tokenSummary =
+      parts.isEmpty ? '' : ' · tokens: ${parts.join(', ')}';
+  if (reason != null) return 'Step completed ($reason)$tokenSummary';
+  return 'Step completed$tokenSummary';
 }
 
 void _handleCliEvent(
@@ -80,6 +95,11 @@ void _handleCliEvent(
 ) {
   final payload = event.cliEvent;
   if (payload == null) return;
+
+  final sessionId = _asString(payload['sessionID']) ?? _asString(payload['sessionId']);
+  if (sessionId != null) {
+    sessionNotifier.setSessionId(sessionId);
+  }
 
   final type = payload['type'] as String?;
   if (type == null) return;
@@ -106,7 +126,7 @@ void _handleCliEvent(
         _appendLog(
           sessionNotifier,
           level: AgentLogLevel.info,
-          message: 'Thinking: $text',
+          message: text,
           source: LogSource.structured,
           structuredType: type,
         );
@@ -158,6 +178,56 @@ void _handleCliEvent(
         sessionNotifier,
         level: AgentLogLevel.info,
         message: _stepFinishSummary(_asMap(payload['part'])),
+        source: LogSource.structured,
+        structuredType: type,
+      );
+      break;
+
+    case 'awaiting_approval':
+      final requestId = _asString(payload['requestID']) ?? _asString(payload['requestId']);
+      final question = _asString(payload['question']) ?? 'Permission requested';
+      final timeoutMs = payload['timeoutMs'] is int ? payload['timeoutMs'] as int : null;
+
+      final rawOptions = payload['options'];
+      List<String>? options;
+      if (rawOptions is List) {
+        options = rawOptions.whereType<String>().toList();
+        if (options.isEmpty) options = null;
+      }
+
+      if (requestId != null) {
+        sessionNotifier.pushDecision(
+          DecisionItem(
+            awaitingResponseId: requestId,
+            question: question,
+            options: options,
+            timeoutMs: timeoutMs,
+            receivedAt: DateTime.now().toIso8601String(),
+          ),
+        );
+        sessionNotifier.setStatus(SessionStatus.awaitingApproval);
+      }
+
+      _appendLog(
+        sessionNotifier,
+        level: AgentLogLevel.warn,
+        message: 'Approval needed: $question',
+        source: LogSource.structured,
+        structuredType: type,
+      );
+      break;
+
+    case 'approval_resolved':
+      final requestId = _asString(payload['requestID']) ?? _asString(payload['requestId']);
+      final reply = _asString(payload['reply']) ?? 'once';
+      if (requestId != null) {
+        sessionNotifier.resolveDecision(requestId);
+      }
+      sessionNotifier.setStatus(SessionStatus.running);
+      _appendLog(
+        sessionNotifier,
+        level: AgentLogLevel.info,
+        message: 'Approval response sent: $reply',
         source: LogSource.structured,
         structuredType: type,
       );

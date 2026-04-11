@@ -16,27 +16,27 @@ const dependenceLevels = <DependenceLevel>[
   DependenceLevel(
     level: 1,
     name: 'Ask everything',
-    description: 'Agent asks for your approval on every single action.',
+    description: 'Agent asks for approval before every meaningful action.',
   ),
   DependenceLevel(
     level: 2,
     name: 'Ask on writes',
-    description: 'Agent acts independently on reads, asks before any write.',
+    description: 'Agent acts independently on reads and asks before write-like actions.',
   ),
   DependenceLevel(
     level: 3,
     name: 'Ask on ambiguity',
-    description: 'Agent proceeds on clear tasks, asks when uncertain.',
+    description: 'Agent proceeds on clear tasks and asks when intent is ambiguous.',
   ),
   DependenceLevel(
     level: 4,
     name: 'Ask on destructive',
-    description: 'Agent works freely, only asks before destructive operations.',
+    description: 'Agent works freely and asks before risky or destructive operations.',
   ),
   DependenceLevel(
     level: 5,
     name: 'Full delegate',
-    description: 'Agent has full autonomy — no interruptions.',
+    description: 'Agent has full autonomy with auto-approved permissions.',
   ),
 ];
 

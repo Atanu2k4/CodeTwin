@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/session_status.dart';
 import '../models/log_entry.dart';
 
+const Object _unset = Object();
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -36,28 +38,36 @@ class SessionState {
   static const empty = SessionState();
 
   SessionState copyWith({
-    String? sessionId,
-    String? projectId,
+    Object? sessionId = _unset,
+    Object? projectId = _unset,
     SessionStatus? status,
-    String? currentTask,
+    Object? currentTask = _unset,
     int? dependenceLevel,
     List<LogEntry>? logs,
     List<PreflightItem>? preflightQueue,
     List<DecisionItem>? decisionQueue,
-    TaskCompletePayload? lastComplete,
-    TaskFailedPayload? lastFailed,
+    Object? lastComplete = _unset,
+    Object? lastFailed = _unset,
   }) {
     return SessionState(
-      sessionId: sessionId ?? this.sessionId,
-      projectId: projectId ?? this.projectId,
+      sessionId:
+          identical(sessionId, _unset) ? this.sessionId : sessionId as String?,
+      projectId:
+          identical(projectId, _unset) ? this.projectId : projectId as String?,
       status: status ?? this.status,
-      currentTask: currentTask ?? this.currentTask,
+      currentTask: identical(currentTask, _unset)
+          ? this.currentTask
+          : currentTask as String?,
       dependenceLevel: dependenceLevel ?? this.dependenceLevel,
       logs: logs ?? this.logs,
       preflightQueue: preflightQueue ?? this.preflightQueue,
       decisionQueue: decisionQueue ?? this.decisionQueue,
-      lastComplete: lastComplete ?? this.lastComplete,
-      lastFailed: lastFailed ?? this.lastFailed,
+      lastComplete: identical(lastComplete, _unset)
+          ? this.lastComplete
+          : lastComplete as TaskCompletePayload?,
+      lastFailed: identical(lastFailed, _unset)
+          ? this.lastFailed
+          : lastFailed as TaskFailedPayload?,
     );
   }
 }
@@ -124,11 +134,22 @@ class SessionNotifier extends AsyncNotifier<SessionState> {
   }
 
   void setLevel(int level) {
-    state = AsyncData(_s.copyWith(dependenceLevel: level.clamp(1, 5)));
+    // Dependence level modifies permission rules in CLI sessions.
+    // Reset stored session id so next run starts a fresh session with new rules.
+    state = AsyncData(
+      _s.copyWith(
+        dependenceLevel: level.clamp(1, 5),
+        sessionId: null,
+      ),
+    );
   }
 
   void setCurrentTask(String? task) {
     state = AsyncData(_s.copyWith(currentTask: task));
+  }
+
+  void setSessionId(String? sessionId) {
+    state = AsyncData(_s.copyWith(sessionId: sessionId));
   }
 
   void setSession(String sessionId, String projectId) {

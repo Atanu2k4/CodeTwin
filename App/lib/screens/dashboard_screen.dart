@@ -17,6 +17,20 @@ import '../widgets/daemon_status_bar.dart';
 import '../widgets/session_status_badge.dart';
 import '../theme/cli_theme.dart';
 
+bool _isChatInteraction(LogEntry log) {
+  if (log.source == LogSource.raw) return false;
+  if (log.source == LogSource.local) return true;
+  final type = log.structuredType;
+  if (type == null) return true;
+  return type == 'text' || type == 'error';
+}
+
+bool _isTimelineEvent(LogEntry log) {
+  if (log.source != LogSource.structured) return false;
+  final type = log.structuredType;
+  return type != null && type != 'text';
+}
+
 // ── Fade-slide-in wrapper ─────────────────────────────────────────────────────
 class _FadeSlide extends StatefulWidget {
   final Widget child;
@@ -68,6 +82,8 @@ class DashboardScreen extends ConsumerWidget {
     final session =
         ref.watch(sessionProvider).valueOrNull ?? SessionState.empty;
     final actions = ref.read(daemonActionsProvider);
+    final chatLogs = session.logs.where(_isChatInteraction).toList();
+    final timelineLogs = session.logs.where(_isTimelineEvent).toList();
 
     return CliTheme(
       level: session.dependenceLevel,
@@ -176,26 +192,27 @@ class DashboardScreen extends ConsumerWidget {
                                           body: session.lastFailed!.error,
                                         ),
                                       ),
+
+                                    if (timelineLogs.isNotEmpty &&
+                                        session.preflightQueue.isEmpty &&
+                                        session.decisionQueue.isEmpty)
+                                      _FadeSlide(
+                                        delay: const Duration(milliseconds: 90),
+                                        child: _ProcessTimelineSection(logs: timelineLogs),
+                                      ),
                                   ],
                                 ),
                               ),
                             ),
 
                             // ── Chat log fills remaining space ───────────────────
-                            if (session.logs
-                                    .any((l) =>
-                                        l.level != AgentLogLevel.error &&
-                                        l.source != LogSource.raw) &&
+                            if (chatLogs.isNotEmpty &&
                                 session.preflightQueue.isEmpty &&
                                 session.decisionQueue.isEmpty)
                               SliverFillRemaining(
                                 hasScrollBody: true,
                                 child: ChatMessageList(
-                                  logs: session.logs
-                                      .where((l) =>
-                                          l.level != AgentLogLevel.error &&
-                                          l.source != LogSource.raw)
-                                      .toList(),
+                                  logs: chatLogs,
                                 ),
                               ),
 
@@ -282,6 +299,122 @@ class _FloatingStatusBar extends ConsumerWidget {
         SessionStatusBadge(status: session.status, currentTask: session.currentTask),
         const Spacer(),
       ],
+    );
+  }
+}
+
+class _ProcessTimelineSection extends StatelessWidget {
+  final List<LogEntry> logs;
+  const _ProcessTimelineSection({required this.logs});
+
+  @override
+  Widget build(BuildContext context) {
+    final cli = CliTheme.of(context);
+    final recent = logs.length > 8 ? logs.sublist(logs.length - 8) : logs;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Container(
+        decoration: cli.box(borderColor: cli.border),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          collapsedIconColor: cli.textDim,
+          iconColor: cli.accent,
+          title: Text(
+            'PROCESS TIMELINE',
+            style: cli.mono.copyWith(
+              color: cli.textDim,
+              fontSize: 10,
+              letterSpacing: 1.4,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          subtitle: Text(
+            '${recent.length} recent events',
+            style: cli.mono.copyWith(color: cli.textDim, fontSize: 10),
+          ),
+          children: [
+            for (final entry in recent)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _TimelineEventRow(entry: entry),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TimelineEventRow extends StatelessWidget {
+  final LogEntry entry;
+  const _TimelineEventRow({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final cli = CliTheme.of(context);
+    final type = entry.structuredType ?? 'event';
+
+    final (IconData icon, String label, Color color) = switch (type) {
+      'reasoning' => (Icons.psychology_alt_outlined, 'Thinking', cli.cyan),
+      'step_start' => (Icons.play_arrow_rounded, 'Step start', cli.amber),
+      'step_finish' => (Icons.check_circle_outline, 'Step finish', cli.accent),
+      'tool_use' => (Icons.build_circle_outlined, 'Tool', cli.accent),
+      'awaiting_approval' => (Icons.help_outline, 'Awaiting approval', cli.amber),
+      'approval_resolved' => (Icons.task_alt, 'Approval resolved', cli.accent),
+      _ => (Icons.circle_outlined, type, cli.textDim),
+    };
+
+    final isLong = entry.message.length > 140;
+
+    if (!isLong) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$label · ${entry.message}',
+              style: cli.mono.copyWith(color: cli.text, fontSize: 11, height: 1.35),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(top: 4),
+        collapsedIconColor: cli.textDim,
+        iconColor: cli.accent,
+        title: Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$label · ${entry.message.substring(0, 120)}...',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: cli.mono.copyWith(color: cli.text, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              entry.message,
+              style: cli.mono.copyWith(color: cli.textDim, fontSize: 11, height: 1.35),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -10,7 +10,7 @@ const steps = [
     num: '01',
     icon: <Download size={14} />,
     title: 'Install CodeTwin',
-    description: 'One command to install globally via npm or a shell script.',
+    description: 'Linux/macOS one-liner here, with a Windows PowerShell one-liner in docs.',
     code: 'curl -fsSL https://code-twin.vercel.app/install.sh | bash',
   },
   {

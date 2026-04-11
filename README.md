@@ -1,118 +1,141 @@
 # CodeTwin
 
-CodeTwin is a terminal-first AI coding agent with a paired mobile app for remote control and approvals.
+CodeTwin is a terminal-first AI coding agent.
+
+The CLI is the main product. Launching the CLI with no arguments opens the interactive TUI.
+
+The mobile app is an addon and is mainly for remote control when you are away from your laptop.
 
 Public links:
 
 - Website: https://code-twin.vercel.app/
 - GitHub: https://github.com/Sahnik0/CodeTwin
 
-This README is a full install and run guide for new users on Windows and Linux/macOS.
+## Product Model
+
+- Main experience: local CLI + TUI in your terminal.
+- Optional companion: mobile app for remote task control and approvals.
+- Provider model: BYOK supported (bring your own API key).
+- Free usage path: opencode provider supports no-cost models, with an upsell prompt when free usage is exhausted.
 
 ## What Is In This Repository
 
-- App: Flutter mobile app (pairing, approvals, dashboard, timeline)
-- CLI: Core codetwin runtime and local launchers
-- codetwin-remote-server: Bridge service between mobile app and worker
-- Website: Marketing/docs site and public install script
+- App: Flutter mobile remote companion.
+- CLI: codetwin runtime, wrappers, and TUI.
+- codetwin-remote-server: bridge between mobile app and worker.
+- Website: landing/docs and install scripts.
 
-## Installation Paths
+## Basic User Guide (Recommended)
 
-You have 2 supported ways to start using CodeTwin:
+### 1) Install CLI (One-Liner)
 
-1. Source install (Windows, Linux, macOS)
-2. One-liner shell install (Linux/macOS):
+Windows PowerShell:
+
+```powershell
+irm https://code-twin.vercel.app/install.ps1 | iex
+```
+
+Linux/macOS:
 
 ```bash
 curl -fsSL https://code-twin.vercel.app/install.sh | bash
 ```
 
-After one-liner install, use:
+After install, open a new terminal and verify:
+
+```bash
+codetwin --help
+```
+
+### 2) Open the TUI (Main Experience)
+
+From your project folder:
+
+```bash
+codetwin
+```
+
+This starts the interactive CodeTwin TUI.
+
+You can also run a one-shot task:
+
+```bash
+codetwin run "refactor auth module and add tests"
+```
+
+### 3) Provider Setup (Free Tier + BYOK)
+
+Option A: start with the built-in free usage path (opencode provider no-cost models).
+
+Option B: BYOK for full provider choice and limits:
+
+```bash
+codetwin providers login
+codetwin providers list
+codetwin models
+```
+
+Supported provider set includes OpenAI, Anthropic, Groq, Gemini, Mistral, Ollama, Azure, and others via the provider system.
+
+### 4) Mobile App Is Optional (Remote Companion)
+
+You do not need the mobile app to use CodeTwin locally.
+
+Use the mobile app only when you want remote control while away from your laptop.
+
+Mobile app download link:
+
+- Drive link (to be added by maintainer): PENDING
+
+Remote pairing flow:
 
 ```bash
 codetwin login https://codetwin-1quv.onrender.com
+```
+
+Then enter the 12-character pairing code in the app Pair screen and start worker:
+
+```bash
 codetwin worker
 ```
 
-For Windows, use the source install path below.
+## Developer Guide
 
-## Prerequisites
+Use this if you want to change CodeTwin code, not just use it.
 
-### Required for CLI
+### Prerequisites
 
 - Git
 - Bun
+- Flutter SDK (only if editing mobile app)
+- Android Studio/Xcode (only if building mobile targets)
 
-### Required for mobile app development
-
-- Flutter SDK
-- Android Studio (Android target) and/or Xcode (iOS target)
-
-## Source Install (Windows)
-
-Open PowerShell:
-
-```powershell
-git clone https://github.com/Sahnik0/CodeTwin.git
-cd CodeTwin
-```
-
-Pair CLI device with bridge:
-
-```powershell
-.\CLI\codetwin.cmd login https://codetwin-1quv.onrender.com
-```
-
-The CLI prints a 12-character pairing code.
-
-In mobile app Pair screen, enter:
-
-- Server URL: https://codetwin-1quv.onrender.com
-- Pairing code: value shown in terminal
-
-Then start worker:
-
-```powershell
-.\CLI\codetwin.cmd worker
-```
-
-Run mobile app:
-
-```powershell
-cd .\App
-flutter pub get
-flutter run
-```
-
-## Source Install (Linux/macOS)
-
-Open your shell:
+### Clone Source
 
 ```bash
 git clone https://github.com/Sahnik0/CodeTwin.git
 cd CodeTwin
 ```
 
-Pair CLI device with bridge:
+### Run CLI From Source
 
-```bash
-./CLI/codetwin login https://codetwin-1quv.onrender.com
+Windows:
+
+```powershell
+.\CLI\codetwin.cmd
 ```
 
-The CLI prints a 12-character pairing code.
-
-In mobile app Pair screen, enter:
-
-- Server URL: https://codetwin-1quv.onrender.com
-- Pairing code: value shown in terminal
-
-Start worker:
+Linux/macOS:
 
 ```bash
-./CLI/codetwin worker
+./CLI/codetwin
 ```
 
-Run mobile app:
+With no args, both wrappers open the TUI.
+
+### Run Mobile App Locally (Only If You Are Developing App Changes)
+
+If you are just a normal user, skip this section.
 
 ```bash
 cd App
@@ -120,60 +143,45 @@ flutter pub get
 flutter run
 ```
 
-## Daily Workflow After First Pairing
+### Remote Worker Dev Flow
 
-### Windows
+Windows:
 
 ```powershell
+.\CLI\codetwin.cmd login https://codetwin-1quv.onrender.com
 .\CLI\codetwin.cmd worker
 ```
 
-### Linux/macOS
+Linux/macOS:
 
 ```bash
+./CLI/codetwin login https://codetwin-1quv.onrender.com
 ./CLI/codetwin worker
 ```
 
-If installed with the one-liner and your PATH is set:
+## Quick Command Map
 
-```bash
-codetwin worker
-```
-
-## Pairing And Tokens Explained
-
-Normal user flow does not require manually supplying REMOTE_EXEC_TOKEN.
-
-What happens during normal pairing:
-
-1. You run login and get a short pairing code.
-2. Mobile app confirms the code.
-3. Bridge issues scoped tokens automatically.
-4. CLI stores worker credentials.
-5. App stores client token securely.
-
-Use REMOTE_EXEC_TOKEN only for admin-style direct access in self-hosted bridge setups.
+- Start TUI: codetwin
+- One-shot task: codetwin run "task"
+- Provider login: codetwin providers login
+- List providers: codetwin providers list
+- List models: codetwin models
+- Pair remote app: codetwin login <bridge-url>
+- Start remote worker: codetwin worker
+- Usage/cost stats: codetwin stats
 
 ## Troubleshooting
 
-- Worker does not connect:
-  - Re-run login, then start worker again.
-  - Ensure server URL is the same in both CLI and mobile app.
+- codetwin not found after one-liner install:
+  - open a new terminal
+  - ensure your PATH update applied
 - Pairing code expired:
-  - Run login again and enter the new code.
-- Command not found after one-liner install:
-  - Open a new terminal.
-  - Ensure ~/.local/bin is in PATH.
+  - re-run codetwin login and enter the new code
+- Worker not connecting:
+  - confirm same bridge URL in both CLI and app
 
-## Command Reference
+## Notes On Free Usage
 
-Pair device:
-
-- Windows: .\CLI\codetwin.cmd login https://codetwin-1quv.onrender.com
-- Linux/macOS: ./CLI/codetwin login https://codetwin-1quv.onrender.com
-
-Start worker:
-
-- Windows: .\CLI\codetwin.cmd worker
-- Linux/macOS: ./CLI/codetwin worker
-- One-liner install: codetwin worker
+- Free usage can be exhausted depending on provider path and limits.
+- When exceeded on opencode free usage, the CLI may surface an upsell message.
+- For production reliability, BYOK is recommended.

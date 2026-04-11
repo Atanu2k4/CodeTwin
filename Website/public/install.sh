@@ -85,7 +85,7 @@ main() {
   os="$(detect_os)"
 
   if [ "$os" = "windows" ]; then
-    fail "This script targets Linux/macOS shells. For Windows, use the PowerShell setup in the repository README."
+    fail "This script targets Linux/macOS shells. For Windows PowerShell use: irm https://code-twin.vercel.app/install.ps1 | iex"
   fi
 
   if [ "$os" = "unsupported" ]; then

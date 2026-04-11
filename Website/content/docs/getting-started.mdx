@@ -8,6 +8,12 @@ CodeTwin is a terminal-first AI coding agent that runs on your machine. This gui
 
 ## Installation
 
+### Windows one-liner (PowerShell)
+
+```powershell
+irm https://code-twin.vercel.app/install.ps1 | iex
+```
+
 ### Linux/macOS one-liner
 
 ```bash
@@ -18,6 +24,12 @@ Open a new terminal, then verify:
 
 ```bash
 codetwin --help
+```
+
+If you installed with one-liner, start the TUI from any project folder using:
+
+```bash
+codetwin
 ```
 
 ### Source install (Windows, Linux, macOS)
@@ -40,6 +52,11 @@ Windows equivalent:
 ```
 
 ## Provider authentication
+
+CodeTwin supports both:
+
+- limited free usage path (opencode no-cost models), and
+- BYOK (bring your own API key) across providers.
 
 Authenticate a provider and verify saved credentials:
 
@@ -75,6 +92,14 @@ codetwin run "add tests for auth middleware" --dependence-level 3
 ```
 
 ## Mobile pairing and worker
+
+Mobile app is optional and mainly for remote usage while away from your laptop.
+
+If you are only using local CLI/TUI, you can skip this section.
+
+Mobile app download:
+
+- Drive link: PENDING (maintainer will add)
 
 Pair this CLI device with a bridge:
 

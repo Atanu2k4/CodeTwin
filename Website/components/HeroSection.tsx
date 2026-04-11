@@ -121,7 +121,7 @@ export default function HeroSection() {
 
         {/* Hero screenshot placeholder */}
         <motion.div
-          className="w-full max-w-4xl"
+          className="w-[min(95vw,1040px)] max-w-none"
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.78, duration: 0.7, ease: easeOut }}
@@ -139,18 +139,18 @@ export default function HeroSection() {
               colors={['#a6a6ed', '#ffffff', '#2dd4bf']}
               className="w-full aspect-[16/9]"
             >
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <div className="w-8 h-8 rounded border border-border-default flex items-center justify-center opacity-30">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <rect x="1" y="1" width="12" height="12" rx="1.5" stroke="#888" strokeWidth="1.2" />
-                    <path d="M4 7h6M7 4v6" stroke="#888" strokeWidth="1.2" strokeLinecap="round" />
-                  </svg>
-                </div>
-                <span className="text-text-muted text-[11px] font-mono opacity-30 tracking-widest uppercase">
-                  Screenshot Coming Soon
-                </span>
+              <div className="absolute inset-[2px] overflow-hidden rounded-[14px]">
+                <video
+                  src="/HeroVideo.mp4"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="auto"
+                  className="h-full w-full object-cover"
+                />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-background/60 to-transparent" />
               </div>
-              <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-background/60 to-transparent" />
             </BorderGlow>
           </motion.div>
         </motion.div>

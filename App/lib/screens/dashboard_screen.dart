@@ -344,23 +344,12 @@ class _BottomBar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (canInput) ...[
-            // Terminal-style prompt row
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6, left: 2),
-              child: Row(
-                children: [
-                  Text('codetwin',
-                      style: cli.mono.copyWith(color: cli.accentDim, fontSize: 10)),
-                  Text('@agent',
-                      style: cli.mono.copyWith(color: cli.textDim, fontSize: 10)),
-                  Text(' % ',
-                      style: cli.mono.copyWith(color: cli.accent, fontSize: 10)),
-                  if (session.status == SessionStatus.failed)
-                    Text(' (last task failed — try again)',
-                        style: cli.mono.copyWith(color: cli.amber, fontSize: 10)),
-                ],
+            if (session.status == SessionStatus.failed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, left: 2),
+                child: Text(' (last task failed — try again)',
+                    style: cli.mono.copyWith(color: cli.amber, fontSize: 10)),
               ),
-            ),
             TaskInput(
               enabled: true,
               onSubmit: (task) => actions.submitTask(task),

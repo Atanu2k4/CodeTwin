@@ -103,14 +103,17 @@ class ShellScreen extends ConsumerWidget {
                         Positioned(
                           top: 4,
                           left: 16,
-                          right: 16,
+                          right: 64,
                           child: _FloatingStatusBar(session: session),
                         ),
 
                       Positioned(
-                        bottom: 16,
+                        top: 14,
                         right: 16,
-                        child: const DaemonStatusBar(),
+                        child: Transform.scale(
+                          scale: 0.75,
+                          child: const DaemonStatusBar(),
+                        ),
                       ),
                     ],
                   ),

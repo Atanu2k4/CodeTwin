@@ -9,6 +9,7 @@ import '../widgets/session_status_badge.dart';
 import '../widgets/daemon_status_bar.dart';
 import '../theme/cli_theme.dart';
 import '../services/bridge_listener_service.dart';
+import '../widgets/restart_widget.dart';
 
 class SwipeableShellContainer extends StatefulWidget {
   final StatefulNavigationShell navigationShell;
@@ -111,15 +112,32 @@ class ShellScreen extends ConsumerWidget {
                           ),
                         ),
 
-                      Positioned(
-                        top: 4,
-                        right: 16,
-                        height: 32,
-                        child: Align(
+                      if (shell.currentIndex == 0)
+                        Positioned(
+                          top: 4,
+                          right: 16,
+                          height: 32,
+                          child: Align(
                           alignment: Alignment.centerRight,
-                          child: Transform.scale(
-                            scale: 0.75,
-                            child: const DaemonStatusBar(),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Transform.scale(
+                                scale: 0.75,
+                                child: IconButton(
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () {
+                                    RestartWidget.restartApp(context);
+                                  },
+                                  icon: Icon(Icons.refresh, color: cli.textDim),
+                                  tooltip: 'Restart App',
+                                ),
+                              ),
+                              Transform.scale(
+                                scale: 0.75,
+                                child: const DaemonStatusBar(),
+                              ),
+                            ],
                           ),
                         ),
                       ),

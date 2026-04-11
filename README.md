@@ -85,7 +85,7 @@ codetwin models
 
 Supported provider set includes OpenAI, Anthropic, Groq, Gemini, Mistral, Ollama, Azure, and others via the provider system.
 
-### 4) Mobile Connection (Core USP)
+### 4) Mobile Connection
 
 Mobile connection is a core part of the CodeTwin idea, not an afterthought.
 

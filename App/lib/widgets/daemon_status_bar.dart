@@ -88,14 +88,13 @@ class _DaemonStatusBarState extends ConsumerState<DaemonStatusBar>
         decoration: BoxDecoration(
           color: bg,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: fg.withValues(alpha: 0.8),
-            width: 1.2,
-          ),
+          border: Border.all(color: fg.withValues(alpha: 0.8), width: 1.2),
         ),
         padding: const EdgeInsets.all(8),
         child: RotationTransition(
-          turns: isConnecting ? _spinController : const AlwaysStoppedAnimation(0),
+          turns: isConnecting
+              ? _spinController
+              : const AlwaysStoppedAnimation(0),
           child: Icon(icon, color: fg, size: 18),
         ),
       ),

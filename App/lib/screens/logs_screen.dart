@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/session_status.dart';
 import '../providers/session_provider.dart';
 import '../widgets/agent_log_list.dart';
+import '../widgets/process_timeline_list.dart';
+
+enum _LogsViewMode { timeline, raw }
 
 class LogsScreen extends ConsumerStatefulWidget {
   const LogsScreen({super.key});
@@ -15,6 +18,7 @@ class LogsScreen extends ConsumerStatefulWidget {
 
 class _LogsScreenState extends ConsumerState<LogsScreen> {
   AgentLogLevel? _filter;
+  _LogsViewMode _mode = _LogsViewMode.timeline;
 
   @override
   Widget build(BuildContext context) {
@@ -35,22 +39,35 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
       ),
       body: Column(
         children: [
-          // Filter bar
+          // View mode switch
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 8.0,
-              runSpacing: 8.0,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Row(
               children: [
-                _buildChip('All', null),
-                _buildChip('Info', AgentLogLevel.info),
-                _buildChip('Warn', AgentLogLevel.warn),
-                _buildChip('Error', AgentLogLevel.error),
-                _buildChip('Tool', AgentLogLevel.tool),
+                _modeChip('Process Timeline', _LogsViewMode.timeline),
+                const SizedBox(width: 8),
+                _modeChip('Raw Logs', _LogsViewMode.raw),
               ],
             ),
           ),
+
+          // Filter bar
+          if (_mode == _LogsViewMode.raw)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8.0,
+                runSpacing: 8.0,
+                children: [
+                  _buildChip('All', null),
+                  _buildChip('Info', AgentLogLevel.info),
+                  _buildChip('Warn', AgentLogLevel.warn),
+                  _buildChip('Error', AgentLogLevel.error),
+                  _buildChip('Tool', AgentLogLevel.tool),
+                ],
+              ),
+            ),
 
           // Log list
           Expanded(
@@ -102,9 +119,41 @@ class _LogsScreenState extends ConsumerState<LogsScreen> {
                       ],
                     ),
                   )
-                : AgentLogList(logs: session.logs, filter: _filter),
+                : (_mode == _LogsViewMode.timeline
+                    ? ProcessTimelineList(logs: session.logs)
+                    : AgentLogList(logs: session.logs, filter: _filter)),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _modeChip(String label, _LogsViewMode value) {
+    final isSelected = _mode == value;
+    final primaryColor = const Color(0xFF20B2AA);
+
+    return GestureDetector(
+      onTap: () => setState(() => _mode = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? primaryColor.withValues(alpha: 0.2) : const Color(0xFF16161A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? primaryColor : Colors.white.withValues(alpha: 0.1),
+            width: 1.5,
+          ),
+        ),
+        child: Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            color: isSelected ? primaryColor : Colors.white.withValues(alpha: 0.55),
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.7,
+          ),
+        ),
       ),
     );
   }

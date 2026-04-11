@@ -10,11 +10,15 @@ function allow(permission: string): Permission.Rule {
   return { permission, pattern: "*", action: "allow" }
 }
 
+function ask(permission: string): Permission.Rule {
+  return { permission, pattern: "*", action: "ask" }
+}
+
 export function rules(level?: number): Permission.Ruleset {
   if (!level) return []
 
   if (level === 1) {
-    return [deny("*")]
+    return [ask("*")]
   }
 
   if (level === 2) {
@@ -23,17 +27,21 @@ export function rules(level?: number): Permission.Ruleset {
       allow("list"),
       allow("glob"),
       allow("grep"),
-      deny("bash"),
-      deny("edit"),
-      deny("write"),
-      deny("multiedit"),
-      deny("patch"),
-      deny("task"),
-      deny("webfetch"),
+      ask("bash"),
+      ask("edit"),
+      ask("write"),
+      ask("multiedit"),
+      ask("patch"),
+      ask("task"),
+      ask("webfetch"),
     ]
   }
 
-  if (level === 4 || level === 5) {
+  if (level === 4) {
+    return []
+  }
+
+  if (level === 5) {
     return [allow("*")]
   }
 

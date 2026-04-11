@@ -22,6 +22,7 @@ class SocketService {
   SocketService._internal();
 
   WebSocketChannel? _channel;
+  StreamSubscription? _channelSubscription;
   String _mobileDeviceId = '';
 
   final Map<MessageType, List<MessageHandler>> _handlers = {};
@@ -32,6 +33,8 @@ class SocketService {
   int _reconnectAttempts = 0;
   String? _lastWsUrl;
   String? _lastToken;
+  int _connectionGeneration = 0;
+  bool _manualDisconnect = false;
 
   VoidCallback? onPaired;
   VoidCallback? onNoPair;
@@ -52,21 +55,30 @@ class SocketService {
     _lastWsUrl = wsUrl;
     _lastToken = clientToken;
     _mobileDeviceId = mobileDeviceId;
-    disconnect();
+    _manualDisconnect = false;
+
+    _teardownCurrentConnection(
+      closeSocket: true,
+      cancelReconnectTimer: true,
+      resetBackoff: false,
+    );
 
     // Only reset the backoff counter on fresh manual connections,
     // not on internal reconnect scheduling (so backoff actually grows).
     if (!isReconnect) _reconnectAttempts = 0;
 
+    final generation = ++_connectionGeneration;
+
     try {
       final uri = _buildUri(wsUrl, clientToken);
       if (kDebugMode) debugPrint('[SocketService] Connecting to $uri');
 
-      _channel = WebSocketChannel.connect(uri);
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
       _startPingTimer();
 
       // Request subscription immediately after connecting
-      _channel!.stream.listen(
+      _channelSubscription = channel.stream.listen(
         (message) {
           if (message is! String) return;
           try {
@@ -78,10 +90,10 @@ class SocketService {
             if (kDebugMode) debugPrint('[SocketService] Parse error: $e');
           }
         },
-        onDone: () => _handleDisconnect(),
+        onDone: () => _handleDisconnect(generation),
         onError: (error) {
           if (kDebugMode) debugPrint('[SocketService] Error: $error');
-          _handleDisconnect();
+          _handleDisconnect(generation);
         },
       );
 
@@ -89,7 +101,7 @@ class SocketService {
       // (handled in _handleBridgeEvent → BridgeEventType.ready)
     } catch (e) {
       if (kDebugMode) debugPrint('[SocketService] Connect failed: $e');
-      _handleDisconnect();
+      _handleDisconnect(generation);
     }
   }
 
@@ -191,21 +203,63 @@ class SocketService {
     }
   }
 
-  void _handleDisconnect() {
+  void _handleDisconnect(int generation) {
+    // Ignore callbacks from stale sockets that were already replaced.
+    if (generation != _connectionGeneration) return;
+
     if (kDebugMode) debugPrint('[SocketService] Disconnected');
-    _stopPingTimer();
-    _channel = null;
+
+    _teardownCurrentConnection(
+      closeSocket: false,
+      cancelReconnectTimer: true,
+      resetBackoff: false,
+    );
+
     onDisconnected?.call();
-    _scheduleReconnect();
+    if (!_manualDisconnect) {
+      _scheduleReconnect();
+    }
   }
 
   void disconnect() {
+    _manualDisconnect = true;
+    _connectionGeneration++;
+    _teardownCurrentConnection(
+      closeSocket: true,
+      cancelReconnectTimer: true,
+      resetBackoff: true,
+    );
+  }
+
+  void _teardownCurrentConnection({
+    required bool closeSocket,
+    required bool cancelReconnectTimer,
+    required bool resetBackoff,
+  }) {
     _stopPingTimer();
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _reconnectAttempts = 0;
-    _channel?.sink.close();
+
+    final subscription = _channelSubscription;
+    _channelSubscription = null;
+    subscription?.cancel();
+
+    if (cancelReconnectTimer) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+    }
+
+    if (resetBackoff) {
+      _reconnectAttempts = 0;
+    }
+
+    final existing = _channel;
     _channel = null;
+    if (closeSocket) {
+      try {
+        existing?.sink.close();
+      } catch (_) {
+        // Ignore close failures for already-closed sockets.
+      }
+    }
   }
 
   /// Send a raw bridge command JSON object.

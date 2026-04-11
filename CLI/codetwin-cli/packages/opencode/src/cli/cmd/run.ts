@@ -50,6 +50,8 @@ type Inline = {
   description?: string
 }
 
+type PermissionReply = "once" | "always" | "reject"
+
 function inline(info: Inline) {
   const suffix = info.description ? UI.Style.TEXT_DIM + ` ${info.description}` + UI.Style.TEXT_NORMAL : ""
   UI.println(UI.Style.TEXT_NORMAL + info.icon, UI.Style.TEXT_NORMAL + info.title + suffix)
@@ -217,6 +219,23 @@ function normalizePath(input?: string) {
   if (!input) return ""
   if (path.isAbsolute(input)) return path.relative(process.cwd(), input) || "."
   return input
+}
+
+function normalizePermissionReply(input: unknown): PermissionReply {
+  if (typeof input !== "string") return "reject"
+  const value = input.trim().toLowerCase()
+  if (!value) return "reject"
+  if (value.includes("always")) return "always"
+  if (value === "approve" || value === "yes" || value === "y" || value.includes("once") || value.includes("allow")) {
+    return "once"
+  }
+  if (value === "reject" || value === "no" || value === "n" || value.includes("deny")) return "reject"
+  return "reject"
+}
+
+function toPermissionQuestion(permission: string, patterns: string[]) {
+  const scope = patterns.length ? ` on ${patterns.join(", ")}` : ""
+  return `Allow ${permission}${scope}?`
 }
 
 export const RunCommand = cmd({
@@ -428,6 +447,80 @@ export const RunCommand = cmd({
 
     async function execute(sdk: OpencodeClient) {
       const skip = args["dangerously-skip-permissions"] || level === 5
+      let sessionID = ""
+      const permissionWaiters = new Map<string, (reply: PermissionReply) => void>()
+      let stdinBuffer = ""
+
+      function resolvePermissionFromInput(line: string) {
+        const trimmed = line.trim()
+        if (!trimmed) return
+
+        let parsed: any
+        try {
+          parsed = JSON.parse(trimmed)
+        } catch {
+          return
+        }
+
+        const payload = parsed?.payload
+        if (!payload || typeof payload !== "object") return
+
+        const requestID =
+          typeof payload.awaitingResponseId === "string"
+            ? payload.awaitingResponseId
+            : typeof payload.requestID === "string"
+              ? payload.requestID
+              : undefined
+        if (!requestID) return
+
+        const waiter = permissionWaiters.get(requestID)
+        if (!waiter) return
+
+        const type = typeof parsed.type === "string" ? parsed.type : ""
+        if (type === "USER_APPROVE") {
+          waiter("once")
+          permissionWaiters.delete(requestID)
+          return
+        }
+
+        if (type === "USER_REJECT") {
+          waiter("reject")
+          permissionWaiters.delete(requestID)
+          return
+        }
+
+        if (type === "USER_ANSWER") {
+          const answer = (payload as Record<string, unknown>).answer
+          waiter(normalizePermissionReply(answer))
+          permissionWaiters.delete(requestID)
+        }
+      }
+
+      function waitForPermissionReply(requestID: string, timeoutMs: number) {
+        return new Promise<PermissionReply>((resolve) => {
+          const timer = setTimeout(() => {
+            permissionWaiters.delete(requestID)
+            resolve("reject")
+          }, timeoutMs)
+
+          permissionWaiters.set(requestID, (reply) => {
+            clearTimeout(timer)
+            resolve(reply)
+          })
+        })
+      }
+
+      if (!process.stdin.isTTY) {
+        process.stdin.setEncoding("utf8")
+        process.stdin.on("data", (chunk: string) => {
+          stdinBuffer += chunk
+          const lines = stdinBuffer.split(/\r?\n/)
+          stdinBuffer = lines.pop() ?? ""
+          for (const line of lines) {
+            resolvePermissionFromInput(line)
+          }
+        })
+      }
 
       function tool(part: ToolPart) {
         try {
@@ -571,14 +664,32 @@ export const RunCommand = cmd({
                 reply: "once",
               })
             } else {
-              UI.println(
-                UI.Style.TEXT_WARNING_BOLD + "!",
-                UI.Style.TEXT_NORMAL +
-                  `permission requested: ${permission.permission} (${permission.patterns.join(", ")}); auto-rejecting`,
-              )
+              const timeoutMs = 180000
+              const options = ["Approve once", "Always allow", "Reject"]
+              const question = toPermissionQuestion(permission.permission, permission.patterns)
+
+              if (
+                !emit("awaiting_approval", {
+                  requestID: permission.id,
+                  question,
+                  options,
+                  timeoutMs,
+                  permission: permission.permission,
+                  patterns: permission.patterns,
+                })
+              ) {
+                UI.println(UI.Style.TEXT_WARNING_BOLD + "!", UI.Style.TEXT_NORMAL + `permission requested: ${question}`)
+              }
+
+              const reply = await waitForPermissionReply(permission.id, timeoutMs)
               await sdk.permission.reply({
                 requestID: permission.id,
-                reply: "reject",
+                reply,
+              })
+
+              emit("approval_resolved", {
+                requestID: permission.id,
+                reply,
               })
             }
           }
@@ -647,7 +758,7 @@ export const RunCommand = cmd({
         return args.agent
       })()
 
-      const sessionID = await session(sdk)
+      sessionID = (await session(sdk)) ?? ""
       if (!sessionID) {
         UI.error("Session not found")
         process.exit(1)

@@ -117,8 +117,20 @@ class _DecisionCardState extends State<DecisionCard> {
                       ),
                       child: Text('${e.key + 1}. ${e.value}'),
                     ),
-                  ))
-            else ...[
+                  )),
+
+            if (hasOptions) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Or send a custom answer:',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+
+            ...[
               TextField(
                 controller: _textController,
                 decoration: const InputDecoration(

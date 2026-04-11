@@ -4,12 +4,18 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../constants/execution_profile.dart';
 import '../models/agent_message.dart';
 import '../models/log_entry.dart';
 import '../models/session_status.dart';
 import '../providers/connection_provider.dart';
 import '../providers/session_provider.dart';
 import '../services/socket_service.dart';
+
+final RegExp _writeIntentPattern = RegExp(
+  r'\b(create|make|write|edit|modify|update|delete|remove|rename|move|add|patch|save)\b|\.(txt|md|json|yaml|yml|toml|dart|ts|js)\b',
+  caseSensitive: false,
+);
 
 class DaemonActions {
   final SocketService socketService;
@@ -54,11 +60,15 @@ class DaemonActions {
     debugPrint('[DaemonActions] activeJobId=${socketService.activeJobId}');
     // ────────────────────────────────────────────────────────────────────────
 
+      final level = session.dependenceLevel.clamp(1, 5).toInt();
+      final profile = executionProfileForLevel(level);
+
     ref.read(sessionProvider.notifier).appendLog(LogEntry(
           id: 'user_input_${DateTime.now().millisecondsSinceEpoch}',
           timestamp: DateTime.now().toIso8601String(),
           level: AgentLogLevel.info,
           message: '> Task: $task',
+          source: LogSource.local,
         ));
 
     if (!isDaemonConnected) {
@@ -68,20 +78,44 @@ class DaemonActions {
             timestamp: DateTime.now().toIso8601String(),
             level: AgentLogLevel.error,
             message: 'Failed to send task: Agent disconnected. Please connect the CLI daemon first.',
+            source: LogSource.local,
           ));
       return;
     }
+
+    if (level <= 2 && _writeIntentPattern.hasMatch(task)) {
+      ref.read(sessionProvider.notifier).appendLog(
+            LogEntry(
+              id: 'warn_level_${DateTime.now().millisecondsSinceEpoch}',
+              timestamp: DateTime.now().toIso8601String(),
+              level: AgentLogLevel.info,
+              message:
+                  'Write-like task detected. Waiting for explicit approval prompts at this dependence level.',
+              source: LogSource.local,
+            ),
+          );
+    }
+
+    final args = <String>[
+      'run',
+      if (session.sessionId != null && session.sessionId!.isNotEmpty) ...[
+        '--session',
+        session.sessionId!,
+      ],
+      task,
+      if (level >= 5) '--dangerously-skip-permissions',
+      '--dependence-level',
+      level.toString(),
+    ];
+
     debugPrint('[DaemonActions] SENDING cliExecute to bridge...');
     socketService.sendBridgeCommand({
       'type': 'cliExecute',
-      'args': [
-        'run',
-        task,
-        '--dangerously-skip-permissions',
-        '--dependence-level',
-        session.dependenceLevel.toString(),
-      ],
-      'env': {'CODETWIN_DEPENDENCE_LEVEL': session.dependenceLevel.toString()},
+      'args': args,
+      'env': {'CODETWIN_DEPENDENCE_LEVEL': level.toString()},
+      'interactive': profile.interactive,
+      'streamFormat': profile.streamFormat,
+      'thinking': profile.thinking,
     });
     
     // Immediately display 'running' rather than waiting for stdout, improving perceived latency.
@@ -117,8 +151,10 @@ class DaemonActions {
       );
 
   void changeLevel(int newLevel) {
-    if (session.status == SessionStatus.idle || session.status == SessionStatus.failed) return;
-    _send(MessageType.levelChange, {'newLevel': newLevel});
+    final level = newLevel.clamp(1, 5).toInt();
+    debugPrint(
+      '[DaemonActions] Level updated locally to $level (applies to next run)',
+    );
   }
 
   void ping() => _send(MessageType.ping, {});
